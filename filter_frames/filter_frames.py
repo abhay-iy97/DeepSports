@@ -41,7 +41,7 @@ def remove_unused_frames(directory, used_frames):
     
 def main():
     # To run them all:
-    for i in ["01", "02", "03", "04", "05", "06", "07", "09", "10", "13", "14", "17", "18", "22", "26"]:
+    for i in ["01", "02", "03", "04", "07", "09", "10", "13", "14", "17", "18", "22", "26"]:
         used_frames = get_used_frames(f"frames{i}.txt")
         remove_unused_frames(f"whole_videos_frames/{i}", used_frames)
         
