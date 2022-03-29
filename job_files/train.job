@@ -1,0 +1,23 @@
+#!/bin/bash
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
+#SBATCH --partition=gpu
+#SBATCH --gres=gpu:v100:2
+#SBATCH --cpus-per-task=8
+#SBATCH --mem=32GB
+#SBATCH --time=01:00:00
+#SBATCH --account=xiangren_818
+echo 'Loading cuda'
+module load cuda/10.2.89
+echo 'Loaded cuda'
+CONDA_PATH=$(conda info | grep -i 'base environment' | awk '{print $4}')
+source $CONDA_PATH/etc/profile.d/conda.sh
+conda init
+echo 'Activate env'
+conda activate timesformer
+echo 'Activated env'
+cd ~/DeepSports/training/TimeSformer/
+echo 'Starting training'
+python train.py
+echo 'Completed'
+conda deactivate
