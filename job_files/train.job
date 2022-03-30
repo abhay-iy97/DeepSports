@@ -21,3 +21,4 @@ echo 'Starting train.py'
 python3 train.py -log INFO --root_dir /scratch1/alalim/whole_videos_frames --pretrained_model ./TimeSformer_divST_8x32_224_K400.pyth --batch_size 4 --epochs 5 --learning_rate 0.00001 --weight_decay 0.00001 --optimizer AdamW --dropout 0.5 --topology 512 256
 echo 'Completed'
 conda deactivate
+exit
