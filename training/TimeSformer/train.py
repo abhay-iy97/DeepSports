@@ -1,4 +1,6 @@
 # For help type 'python train.py -h' in the commandline.
+# Example: python train.py -log INFO --root_dir path\to\whole_videos_frames --pretrained_model path\to\model.pyth --batch_size 4 --epochs 5 --learning_rate 0.0001 --weight_decay 0.00001 --optimizer AdamW --dropout 0.5 --topology 512 256 --frame_method spaced_varied
+
 
 import argparse
 import logging
@@ -68,7 +70,7 @@ def get_cmdline_arguments() -> Dict[str, Any]:
     )
     
     parser.add_argument(
-        "-r",
+        "-root",
         "--root_dir",
         type=str,
         help="The path to the root directory containing the frame images. Default value is './', the same directory of this python script.",
@@ -113,7 +115,7 @@ def get_cmdline_arguments() -> Dict[str, Any]:
     )
     
     parser.add_argument(
-        "-e",
+        "-ep",
         "--epochs",
         type=int,
         help="The number of epochs used in training. Default value is 20.",
@@ -179,8 +181,8 @@ def get_cmdline_arguments() -> Dict[str, Any]:
         "-pm",
         "--pretrained_model",
         type=str,
-        help="The filepath to the pretrained .pyth model for the TimeSformer. Defaults to './TimeSformer_divST_8x32_224_K400.pyth'. If set to 'scratch', it will train a TimeSformer from scratch.",
-        default="./TimeSformer_divST_8x32_224_K400.pyth",
+        help="The filepath to the pretrained .pyth model for the TimeSformer. Defaults to 'scratch'. If set to 'scratch', it will train a TimeSformer from scratch.",
+        default="scratch",
         required=False
     )
     
@@ -206,8 +208,8 @@ def get_cmdline_arguments() -> Dict[str, Any]:
         "-fm",
         "--frame_method",
         type=str,
-        help="The algorithm to use to sample frames from a long clip. Default is 'space_fixed'. Possible values are ['random', 'spaced_fixed', 'spaced_varied'].",
-        default="space_fixed",
+        help="The algorithm to use to sample frames from a long clip. Default is 'spaced_fixed'. Possible values are ['random', 'spaced_fixed', 'spaced_varied'].",
+        default="spaced_fixed",
         required=False
     )
     
@@ -239,16 +241,17 @@ def get_cmdline_arguments() -> Dict[str, Any]:
     )
     
     parser.add_argument(
-        "-t",
+        "-top",
         "--topology",
         type=int,
         help="The hidden neurons topology between the TimeSformer model and the final output layer. Defaults to [512, 256].",
         default=[512, 256],
+        nargs="+",
         required=False
     )
     
     parser.add_argument(
-        "-o",
+        "-out",
         "--output",
         type=str,
         help="The output filepath for the losses figure. Defaults to './losses.png', in the same directory.",
@@ -292,8 +295,8 @@ def get_cmdline_arguments() -> Dict[str, Any]:
         
     # Ensure validation of arguments
     if args["frame_method"] not in ["random", "spaced_fixed", "spaced_varied"]:
-        logging.warning(f"The parameter frame_method uses an invalid value ({args['frame_method']}). Will use 'space_fixed' instead.")
-        args["frame_method"] = "space_fixed"
+        logging.warning(f"The parameter frame_method uses an invalid value ({args['frame_method']}). Will use 'spaced_fixed' instead.")
+        args["frame_method"] = "spaced_fixed"
     if args["attention_type"] not in ["divided_space_time", "space_only","joint_space_time"]:
         logging.warning(f"The parameter attention_type uses an invalid value ({args['attention_type']}). Will use 'divided_space_time' instead.")
         args["attention_type"] = "divided_space_time"
@@ -318,7 +321,7 @@ class VideoClip:
     CONVERT_TENSOR = transforms.ToTensor()
     
     # The root directory path to the frames on disk (should be the one that includes the 01/ 02/ ... directories)
-    FRAME_ROOT_DIR = ""
+    FRAME_ROOT_DIR = "wtf"
     
     # The number of frames each clip will have
     NUM_FRAMES = 8
@@ -327,13 +330,13 @@ class VideoClip:
     # If the image had 80 frames, and we need to sample only 8 frames then:
     #   random- will sample 8 indices from [0, 79] and use the sorted values as the clip values
     #   spaced_fixed- will yield [0, 10, 20, ..., 60, 70] since the step_size=80/8
-    #   space_varied- its similar to space_fixed, except the entire list is shifted by a random value [0, step_size-1]
+    #   space_varied- its similar to spaced_fixed, except the entire list is shifted by a random value [0, step_size-1]
     FRAME_SELECTION_METHOD = "spaced_fixed"
     
     # Spatial dimensions that each clip will be resized to
     SPATIAL_SIZE = 224
     
-    def __init__(self, video_num: int, start_frame: int, end_frame: int, difficulty: float, final_score: float) -> None:
+    def __init__(self, video_num: int, start_frame: int, end_frame: int, difficulty: float, final_score: float, args: Dict[str, Any]) -> None:
         """
         Initializes a video clip from the given metadata.
 
@@ -343,6 +346,7 @@ class VideoClip:
             end_frame (int): the last frame in the clip
             difficulty (float): the difficulty assigned to the clip
             final_score (float): the final score of the clip
+            args (Dict[str, Any]): the commandline arguments.
         """
         
         if start_frame >= end_frame:
@@ -357,6 +361,12 @@ class VideoClip:
         # calculate a normalized score of [0, 1], diving by 30 because 3 judges voting [0, 10] each
         self.normalized_score = (final_score / difficulty) / 30
         
+        # Update state using args
+        self.FRAME_ROOT_DIR = args["root_dir"]
+        self.FRAME_SELECTION_METHOD = args["frame_method"].lower()
+        self.NUM_FRAMES = args["frame_num"]
+        self.SPATIAL_SIZE = args["spatial_size"]
+        
     def load(self) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Loads the clip from disk and returns the inputs and the targets as a tuple of pytorch's tensor:
@@ -368,26 +378,26 @@ class VideoClip:
         """
         
         # Creates the video clip in torch with (channels, num_frames, height, width)
-        clip = torch.empty(size=(3, VideoClip.NUM_FRAMES, VideoClip.SPATIAL_SIZE, VideoClip.SPATIAL_SIZE), dtype=torch.float32)
+        clip = torch.empty(size=(3, self.NUM_FRAMES, self.SPATIAL_SIZE, self.SPATIAL_SIZE), dtype=torch.float32)
         
         # Since we are constrained to a set number of frames, sample (somehow) the frames from the entire clip
         frame_indices = None
         
-        if VideoClip.FRAME_SELECTION_METHOD == "random":
+        if self.FRAME_SELECTION_METHOD == "random":
             frame_range = range(self.start_frame, self.end_frame + 1)
-            frame_indices = sorted(random.sample(frame_range, VideoClip.NUM_FRAMES))
+            frame_indices = sorted(random.sample(frame_range, self.NUM_FRAMES))
         else: # spaced_fixed (default) or spaced_varied
-            step_size = self.clip_num_frames / VideoClip.NUM_FRAMES
-            offset = 0
-            if VideoClip.FRAME_SELECTION_METHOD == "spaced_varied":
-                offset = random.randint(0, VideoClip.NUM_FRAMES - 1)
-            frame_indices = [round(i * step_size + offset) for i in range(VideoClip.NUM_FRAMES)]
+            step_size = self.clip_num_frames / self.NUM_FRAMES
+            offset = self.start_frame
+            if self.FRAME_SELECTION_METHOD == "spaced_varied":
+                offset += random.randint(0, self.NUM_FRAMES - 1)
+            frame_indices = [round(i * step_size + offset) for i in range(self.NUM_FRAMES)]
         
         # Load the images from disk and preprocess them into a tensor
         for idx, frame_num in enumerate(frame_indices):
-            img_path = os.path.join(VideoClip.FRAME_ROOT_DIR, f"{self.video_num:02d}", f"{frame_num:06d}.jpg")
-            img = Image.open(img_path).resize((VideoClip.SPATIAL_SIZE, VideoClip.SPATIAL_SIZE))
-            tensor = VideoClip.convert_tensor(img).type(dtype=torch.float32) # (channels, height, width)
+            img_path = os.path.join(*[self.FRAME_ROOT_DIR, f"{self.video_num:02d}", f"{frame_num:06d}.jpg"])
+            img = Image.open(img_path).resize((self.SPATIAL_SIZE, self.SPATIAL_SIZE))
+            tensor = self.CONVERT_TENSOR(img).type(dtype=torch.float32) # (channels, height, width)
             clip[:, idx, :, :] = tensor
         
         # Create the outputs/targets for this clip
@@ -446,7 +456,7 @@ def load_annotations(filepath: str) -> Annotation:
     """
     logging.info(f"Loading annotations from {filepath}")
     
-    if filepath == None or len(filepath) == 0:
+    if filepath == None:
         logging.error(f"Annotations file path is invalid: {filepath}")
         sys.exit()
     
@@ -467,22 +477,24 @@ def load_annotations(filepath: str) -> Annotation:
             sys.exit()
 
 
-def load_dataset(annotations: Annotation, train_split_filepath: str, test_split_filepath: str, batch_size: int, train_val_split_ratio: float, available_videos: List[int]) -> Tuple[DataLoader, DataLoader, DataLoader]:
+def load_dataset(annotations: Annotation, args: Dict[str, Any]) -> Tuple[DataLoader, DataLoader, DataLoader]:
     """
     Loads the data using the train/test splits given from the official MTL-AQA authors.
     Also, splits the training dataset into a train/validation splits, as specified by 'train_val_split_ratio'.
 
     Args:
         annotations (Annotation): The parsed dictonary representation of the annotations from MTL-AQA authors.
-        train_split_filepath (str): The path to the official train split from MTL-AQA authors (pickle file).
-        test_split_filepath (str): The path to the official test split from MTL-AQA authors (pickle file).
-        batch_size (int): The size of batch size used for the data loaders.
-        train_val_split_ratio (float): The train/validation split ratio, which represents the percentage of instances used for training.
-        available_videos (List[int]): The videos which we want to use in our dataset.
+        args (Dict[str, Any]): The commandline arguments.
 
     Returns:
         Tuple[DataLoader, DataLoader, DataLoader]: The train/validation/test split data loaders
     """
+    
+    train_split_filepath = args["train_path"] # The path to the official train split from MTL-AQA authors (pickle file).
+    test_split_filepath = args["test_path"] # The path to the official test split from MTL-AQA authors (pickle file).
+    batch_size = args["batch_size"] # The size of batch size used for the data loaders.
+    train_val_split_ratio = args["train_val_split_ratio"] # The train/validation split ratio, which represents the percentage of instances used for training.
+    available_videos = args["videos"] # The videos which we want to use in our dataset.   
     
     logging.info("Loading datasets...")
     logging.info(f"Using only these videos: {available_videos}")
@@ -493,7 +505,7 @@ def load_dataset(annotations: Annotation, train_split_filepath: str, test_split_
         try:
             data = pickle.load(f)
             # format of data tuples of (video_num, clip_idx)
-            for (video_num, clip_idx) in data.items():
+            for (video_num, clip_idx) in data:
                 # Skip if not in our available videos (i.e. we want only specific to train on specific vids)
                 if video_num not in available_videos:
                     continue
@@ -504,7 +516,7 @@ def load_dataset(annotations: Annotation, train_split_filepath: str, test_split_
                 end_frame = annotation["end_frame"]
                 difficulty = annotation["difficulty"]
                 final_score = annotation["final_score"]
-                train_val_clips.append(VideoClip(video_num, start_frame, end_frame, difficulty, final_score))
+                train_val_clips.append(VideoClip(video_num, start_frame, end_frame, difficulty, final_score, args))
         except Exception as ex:
             logging.error(f"Failed to load training split file at {train_split_filepath} with reason {ex}")
             sys.exit()
@@ -517,7 +529,7 @@ def load_dataset(annotations: Annotation, train_split_filepath: str, test_split_
         try:
             data = pickle.load(f)
             # format of data tuples of (video_num, clip_idx)
-            for (video_num, clip_idx) in data.items():
+            for (video_num, clip_idx) in data:
                 # Skip if not in our available videos (i.e. we want only specific to train on specific vids)
                 if video_num not in available_videos:
                     continue
@@ -528,7 +540,7 @@ def load_dataset(annotations: Annotation, train_split_filepath: str, test_split_
                 end_frame = annotation["end_frame"]
                 difficulty = annotation["difficulty"]
                 final_score = annotation["final_score"]
-                test_clips.append(VideoClip(video_num, start_frame, end_frame, difficulty, final_score))
+                test_clips.append(VideoClip(video_num, start_frame, end_frame, difficulty, final_score, args))
         except Exception as ex:
             logging.error(f"Failed to load training split file at {test_split_filepath} with reason {ex}")
             sys.exit()
@@ -537,8 +549,8 @@ def load_dataset(annotations: Annotation, train_split_filepath: str, test_split_
             
     # Split the training clips into a train & validation split
     num_clips = len(train_val_clips)
-    num_val = int(num_clips * train_val_split_ratio)
-    num_train = num_clips - num_val
+    num_train = int(num_clips * train_val_split_ratio)
+    num_val = num_clips - num_train
     logging.info(f"Splitting training ({num_clips}) with ratio {train_val_split_ratio} into {num_train} train and {num_val} validation...")
     train_clips, val_clips = random_split(train_val_clips, (num_train, num_val))
     
@@ -589,7 +601,7 @@ class DivingViT(nn.Module):
             net.append(nn.Linear(in_features=last_num_features, out_features=num_features))
             last_num_features = num_features
         net.append(nn.Dropout(p=drop_prob))
-        net.append(last_num_features, 2)
+        net.append(nn.Linear(in_features=last_num_features, out_features=2))
         
         self.stacked_mlp = nn.Sequential(*net)
         
@@ -652,6 +664,7 @@ def create_model(device: torch.device, args: Dict[str, Any]) -> DivingViT:
     
     # Move to the desired device
     model.to(device)
+    return model
 
 
 ################################## Training ##################################
@@ -680,7 +693,6 @@ def train(model: DivingViT, device: torch.device, train_data_loader: DataLoader,
     else:
         optimizer = optim.AdamW(params=model.parameters(), lr=args["learning_rate"], weight_decay=args["weight_decay"])
     
-    criterion = nn.MSELoss()
     scaler = torch.cuda.amp.GradScaler()
     
     train_losses = []
@@ -702,7 +714,7 @@ def train(model: DivingViT, device: torch.device, train_data_loader: DataLoader,
             # Forward pass with autocast, which automatically casts to lower floating precision if needed
             with torch.cuda.amp.autocast():
                 outputs = model(inputs)
-                loss = criterion(outputs, targets)
+                loss = F.mse_loss(outputs, targets)
             
             scaler.scale(loss).backward()
             scaler.step(optimizer)
@@ -716,9 +728,14 @@ def train(model: DivingViT, device: torch.device, train_data_loader: DataLoader,
         model.eval()
         with torch.no_grad():
             for (inputs, targets) in val_data_loader:
+                # Move data to correct device (gpu/cpu)
                 inputs, targets = inputs.to(device), targets.to(device)
-                outputs = model(inputs)
-                loss = criterion(outputs, targets)
+                
+                # Forward pass with autocast, which automatically casts to lower floating precision if needed
+                with torch.cuda.amp.autocast():
+                    outputs = model(inputs)
+                    loss = F.mse_loss(outputs, targets)
+                
                 val_loss.append(loss.item())
         val_losses.append(np.mean(val_loss))
         
@@ -760,12 +777,13 @@ def spearman_correlation(x: torch.Tensor, y: torch.Tensor):
     return 1.0 - (upper / down)
 
 
-def evaluate(model: DivingViT, test_data_loader: DataLoader) -> None:
+def evaluate(model: DivingViT, device: torch.device, test_data_loader: DataLoader) -> None:
     """
     Evaluates the model on the testing dataset by computing the testing loss and spearman correlation.
 
     Args:
         model (DivingViT): model to evaluate
+        device (torch.device): the device (cpu/gpu) to run on
         test_data_loader (DataLoader): testing dataset
     """
     logging.info("Evaluating model...")
@@ -777,6 +795,9 @@ def evaluate(model: DivingViT, test_data_loader: DataLoader) -> None:
     with torch.no_grad():
         model.eval()
         for (inputs, targets) in test_data_loader:
+            # Move data to correct device (gpu/cpu)
+            inputs, targets = inputs.to(device), targets.to(device)
+            
             # Forward pass with autocast, which automatically casts to lower floating precision if needed
             with torch.cuda.amp.autocast():
                 outputs = model(inputs)
@@ -831,20 +852,14 @@ def plot_losses(fig_filepath: str, train_losses: List[float], val_losses: List[f
 
 # Program's main entry point
 def main():
-    logging.info("--- Start of Program ---")
-    
     # Parse commandline arguments
     args = get_cmdline_arguments()
     
-    # Update state using args
-    VideoClip.FRAME_ROOT_DIR = args["root_dir"]
-    VideoClip.FRAME_SELECTION_METHOD = args["frame_method"].lower()
-    VideoClip.NUM_FRAMES = args["frame_num"]
-    VideoClip.SPATIAL_SIZE = args["spatial_size"]
+    logging.info("--- Start of Program ---")
     
     # Prepare dataset
     annotations = load_annotations(args["annotation_path"])
-    train_data, val_data, test_data = load_dataset(annotations, args["train_path"], args["test_path"], args["batch_size"], args["train_val_split_ratio"], args["videos"])
+    train_data, val_data, test_data = load_dataset(annotations, args)
     
     # Get the appropriate device
     device = torch.device('cuda' if args["gpu"] and torch.cuda.is_available() else 'cpu')
@@ -857,7 +872,7 @@ def main():
     train_losses, val_losses = train(model, device, train_data, val_data, args)
     
     # Evaluate the model
-    evaluate(model, test_data)
+    evaluate(model, device, test_data)
     plot_losses(args["output"], train_losses, val_losses)
     
     logging.info("--- End of Program ---")
