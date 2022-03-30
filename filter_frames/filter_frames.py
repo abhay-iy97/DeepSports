@@ -99,7 +99,7 @@ def remove_unused_frames(root_directory: str, used_frames: UsedFrames, video_dir
         logging.error(f"The parsed used frames is None")
         sys.exit(9)
         
-    if video_directories[0].lower() == "all":
+    if isinstance(video_directories, str) and video_directories.lower() == "all":
         video_directories: List[str] = ["01", "02", "03", "04", "05", "06", "07", "09", "10", "13", "14", "17", "18", "22", "26"]
     
     total_stats = {"total_files": 0, "removed_files": 0, "total_size": 0, "removed_size": 0}
