@@ -2,6 +2,7 @@
 
 import pickle
 import os
+from pathlib import Path
 import argparse
 import logging
 import sys
@@ -32,28 +33,28 @@ def convert_size(size_bytes: float) -> str:
    return "%s %s" % (s, size_name[i])
 
 
-# Loads and returns the final annotations dictionary pickle file from the specified filename.
-def load_annotations(filename: str) -> Annotation:
-    logging.info(f"Loading annotations from {filename}")
+# Loads and returns the final annotations dictionary pickle file from the specified filepath.
+def load_annotations(filepath: str) -> Annotation:
+    logging.info(f"Loading annotations from {filepath}")
     
-    if filename == None or len(filename) == 0:
-        logging.error(f"Annotations filename is invalid: {filename}")
+    if filepath == None or len(filepath) == 0:
+        logging.error(f"Annotations file path is invalid: {filepath}")
         sys.exit(1)
     
-    if not os.path.isfile(filename):
-        logging.error(f"Annotations file does not exist at {filename}")
+    if not os.path.isfile(filepath):
+        logging.error(f"Annotations file does not exist at {filepath}")
         sys.exit(2)
     
-    if not filename.lower().endswith(".pkl"):
-        logging.error(f"Annotations file is expected to have a .pkl extension, but was given {filename}")
+    if not filepath.lower().endswith(".pkl"):
+        logging.error(f"Annotations file is expected to have a .pkl extension, but was given {filepath}")
         sys.exit(3)
     
-    with open(filename, "rb") as f:
+    with open(filepath, "rb") as f:
         try:
             data = pickle.load(f)
             return data
         except Exception as ex:
-            logging.error(f"Failed to load annotations file at {filename} with reason {ex}")
+            logging.error(f"Failed to load annotations file at {filepath} with reason {ex}")
             sys.exit(4)
 
 
@@ -157,7 +158,7 @@ def main():
     parser = argparse.ArgumentParser(description="Remove unused diving frames in MTL-AQA dataset.")
     
     parser.add_argument(
-        "-l",
+        "-log",
         "--loglevel",
         type=str,
         help="The level of logging in the application. Default value is 'INFO'. Possible values: [DEBUG, INFO, WARNING, ERROR, CRITICAL].",
@@ -166,7 +167,7 @@ def main():
     )
     
     parser.add_argument(
-        "-r",
+        "-root",
         "--root_dir",
         type=str,
         help="The path to the root directory containing the frame images. Default value is './', the same directory of this python script.",
@@ -175,8 +176,8 @@ def main():
     )
     
     parser.add_argument(
-        "-a",
-        "--annotation",
+        "-ann",
+        "--annotation_path",
         type=str,
         help="The path to the final annotations dict pickle file. Default value is './final_annotations_dict.pkl', in the same directory of this python script.",
         default="./final_annotations_dict.pkl",
@@ -184,11 +185,11 @@ def main():
     )
     
     parser.add_argument(
-        "-v",
-        "--vid",
+        "-vid",
+        "--videos",
         type=str,
         nargs="+",
-        help="The videos directory name to filter the frames for. Default value is 'all', which will filter the frames from all videos present. To filter select directories, only list their directory names, i.e. '-v 01 02 03'",
+        help="The videos directory name to filter the frames for. Default value is 'all', which will filter the frames from all videos present. To filter select directories, only list their directory names, i.e. '-vid 01 02 03'",
         default="all",
         required=False
     )
@@ -197,8 +198,17 @@ def main():
     args = vars(parser.parse_args())
     arg_loglevel = args["loglevel"]
     arg_root_dir = args["root_dir"]
-    arg_annotation = args["annotation"]
-    arg_vid = args["vid"]
+    arg_annotation_path = args["annotation_path"]
+    arg_videos = args["videos"]
+    
+    # Get directory of this script
+    directory_path = Path(__file__).parent.absolute()
+    
+    # Set the defaults of the commandline arguments to be relative to current directory
+    if arg_annotation_path == "./final_annotations_dict.pkl":
+        arg_annotation_path = os.path.join(directory_path, "final_annotations_dict.pkl")
+    if arg_root_dir == "./":
+        arg_root_dir = directory_path
     
     # Prepend a timestamp to each logging
     numeric_loglevel = getattr(logging, arg_loglevel.upper(), None)
@@ -210,9 +220,9 @@ def main():
         datefmt='%Y-%m-%d %H:%M:%S')
     
     # Program logic
-    annotations = load_annotations(arg_annotation)
+    annotations = load_annotations(arg_annotation_path)
     used_frames = parse_used_frames_from_annotations(annotations)
-    remove_unused_frames(arg_root_dir, used_frames, arg_vid)
+    remove_unused_frames(arg_root_dir, used_frames, arg_videos)
     logging.info("Filter framing finished executing")
     
 
