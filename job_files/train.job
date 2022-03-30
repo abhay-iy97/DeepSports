@@ -13,11 +13,11 @@ echo 'Loaded cuda'
 CONDA_PATH=$(conda info | grep -i 'base environment' | awk '{print $4}')
 source $CONDA_PATH/etc/profile.d/conda.sh
 conda init
-echo 'Activate env'
+echo 'Activating env'
 conda activate timesformer
 echo 'Activated env'
 cd ~/DeepSports/training/TimeSformer/
-echo 'Starting training'
-python train.py
+echo 'Starting train.py'
+python3 train.py -log INFO --root_dir /scratch1/alalim/whole_videos_frames --pretrained_model ./TimeSformer_divST_8x32_224_K400.pyth --batch_size 4 --epochs 5 --learning_rate 0.00001 --weight_decay 0.00001 --optimizer AdamW --dropout 0.5 --topology 512 256
 echo 'Completed'
 conda deactivate
