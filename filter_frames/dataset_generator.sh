@@ -26,6 +26,9 @@ echo './frame_extractor.sh COPIED to /scratch1/<username>/deepsports_dataset/'
 cp filter_frames.py frames* -t /scratch1/<username>/deepsports_dataset/
 echo 'filter_frames.py and frames* COPIED to /scratch1/<username>/deepsports_dataset/'
 
+cp final_annotations_dict.pkl -t /scratch1/<username>/deepsports_dataset/
+echo 'final_annotations_dict.pkl COPIED to /scratch1/<username>/deepsports_dataset/'
+
 
 cd /scratch1/<username>/deepsports_dataset/
 touch job_id.txt
