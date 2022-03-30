@@ -1,4 +1,5 @@
 # For help type 'python filter_frames.py -h' in the commandline.
+# Example: python3 filter_frames.py -log INFO -root path\to\whole_videos_frames -ann path\to\final_annotations_dict.pkl -vid all
 
 import pickle
 import os
@@ -37,7 +38,7 @@ def convert_size(size_bytes: float) -> str:
 def load_annotations(filepath: str) -> Annotation:
     logging.info(f"Loading annotations from {filepath}")
     
-    if filepath == None or len(filepath) == 0:
+    if filepath == None:
         logging.error(f"Annotations file path is invalid: {filepath}")
         sys.exit(1)
     
@@ -69,7 +70,7 @@ def parse_used_frames_from_annotations(annotations: Annotation) -> UsedFrames:
     try:
         used_frames = {}
         for (key, value) in annotations.items():
-            video_num = key[0]
+            video_num = f"{key[0]:02d}"
             start_frame = value["start_frame"]
             end_frame = value["end_frame"]
             if video_num not in used_frames:
@@ -86,7 +87,7 @@ def parse_used_frames_from_annotations(annotations: Annotation) -> UsedFrames:
 def remove_unused_frames(root_directory: str, used_frames: UsedFrames, video_directories: Union[str, List[str]]) -> None:
     logging.info(f"Removing unused frames from {root_directory}...")
     
-    if root_directory == None or len(root_directory) == 0:
+    if root_directory == None:
         logging.error(f"Root directory is invalid: {root_directory}")
         sys.exit(7)
         
@@ -98,14 +99,14 @@ def remove_unused_frames(root_directory: str, used_frames: UsedFrames, video_dir
         logging.error(f"The parsed used frames is None")
         sys.exit(9)
         
-    if isinstance(video_directories, str) and video_directories.lower() == "all":
+    if video_directories[0].lower() == "all":
         video_directories: List[str] = ["01", "02", "03", "04", "05", "06", "07", "09", "10", "13", "14", "17", "18", "22", "26"]
     
     total_stats = {"total_files": 0, "removed_files": 0, "total_size": 0, "removed_size": 0}
     for video_dir in video_directories:
-        logging.info(f"Removing unused frames in {video_dir}")
-        video_stats = {"total_files": 0, "removed_files": 0, "total_size": 0, "removed_size": 0}
         video_dir_path = os.path.join(root_directory, video_dir)
+        logging.info(f"Removing unused frames in {video_dir_path}")
+        video_stats = {"total_files": 0, "removed_files": 0, "total_size": 0, "removed_size": 0}
         
         # Process each .jpg file in directory
         try:
@@ -120,6 +121,8 @@ def remove_unused_frames(root_directory: str, used_frames: UsedFrames, video_dir
                         os.remove(f)
                         video_stats["removed_files"] += 1
                         video_stats["removed_size"] += file_size
+                if video_stats["total_files"] % 10000 == 0:
+                    logging.info(f"\tProcessed {video_stats['total_files']} JPG files")
         except Exception as ex:
             logging.error(f"Failed to remove unused frames at {video_dir_path} with reason {ex}")
             sys.exit(10)
@@ -133,24 +136,23 @@ def remove_unused_frames(root_directory: str, used_frames: UsedFrames, video_dir
         # Display current video's statistics
         removed_files_pct = 100 * video_stats["removed_files"] / max(1, video_stats["total_files"])
         removed_size_pct = 100 * video_stats["removed_size"] / max(1, video_stats["total_size"])
-        logging.info(f"""Finished {video_dir}:
-                     \tPrevious: {video_stats['total_files']} ({convert_size(video_stats['total_size'])} bytes)
-                     \tRemoved: {video_stats['removed_files']} ({convert_size(video_stats['removed_size'])} bytes)
-                     \tRemoved%: {removed_files_pct:.1f}% ({removed_size_pct:.1f}% bytes)
-                     \tCurrent: {video_stats['total_files'] - video_stats['removed_files']}
-                      ({convert_size(video_stats['total_size'] - video_stats['removed_size'])} bytes)
-                     """)
+        logging.info(f"\tPrevious: {video_stats['total_files']} ({convert_size(video_stats['total_size'])})"\
+                     f"  Removed: {video_stats['removed_files']} ({convert_size(video_stats['removed_size'])})"\
+                     f"  Removed%: {removed_files_pct:.1f}% ({removed_size_pct:.1f}% bytes)"\
+                     f"  Current: {video_stats['total_files'] - video_stats['removed_files']}"\
+                     f" ({convert_size(video_stats['total_size'] - video_stats['removed_size'])})"
+                     )
         
     # Display overall statistics
     removed_files_pct = 100 * total_stats["removed_files"] / max(1, total_stats["total_files"])
     removed_size_pct = 100 * total_stats["removed_size"] / max(1, total_stats["total_size"])
-    logging.info(f"""Overall:
-                     \tPrevious: {total_stats['total_files']} ({convert_size(total_stats['total_size'])} bytes)
-                     \tRemoved: {total_stats['removed_files']} ({convert_size(total_stats['removed_size'])} bytes)
-                     \tRemoved%: {removed_files_pct:.1f}% ({removed_size_pct:.1f}% bytes)
-                     \tCurrent: {total_stats['total_files'] - total_stats['removed_files']}
-                      ({convert_size(total_stats['total_size'] - total_stats['removed_size'])} bytes)
-                     """)
+    logging.info(f"Overall: "\
+                 f"  Previous: {total_stats['total_files']} ({convert_size(total_stats['total_size'])})"\
+                 f"  Removed: {total_stats['removed_files']} ({convert_size(total_stats['removed_size'])})"\
+                 f"  Removed%: {removed_files_pct:.1f}% ({removed_size_pct:.1f}% bytes)"\
+                 f"  Current: {total_stats['total_files'] - total_stats['removed_files']}"\
+                 f" ({convert_size(total_stats['total_size'] - total_stats['removed_size'])})"
+                 )
 
 
 # Program's main entry point
