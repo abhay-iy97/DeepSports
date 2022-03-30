@@ -1,5 +1,36 @@
-# For help type 'python train.py -h' in the commandline.
-# Example: python train.py -log INFO --root_dir path\to\whole_videos_frames --pretrained_model path\to\model.pyth --batch_size 4 --epochs 5 --learning_rate 0.0001 --weight_decay 0.00001 --optimizer AdamW --dropout 0.5 --topology 512 256 --frame_method spaced_varied
+# For help type 'python train.py -h' in the command-line.
+# Example:
+# python train.py -log INFO --root_dir path\to\whole_videos_frames --pretrained_model path\to\model.pyth --batch_size 4 --epochs 5 --learning_rate 0.00001 --weight_decay 0.00001 --optimizer AdamW --dropout 0.5 --topology 512 256 --frame_method spaced_varied
+
+
+"""
+    Command-Line Argument       Default                             Values
+    ----------------------------------------------------------------------------------------------------------------------
+    loglevel				    INFO                                [DEBUG, INFO, WARNING, ERROR, CRITICAL]
+    gpu						    True                                [False, True]
+    root_dir				    ./                                  directory path
+    train_path				    ./train_split_0.pkl                 .pkl file path
+    test_path				    ./test_split_0.pkl                  .pkl file path
+    batch_size				    4                                   [1, inf]
+    epochs					    20                                  [1, inf]
+    learning_rate			    0.0001                              [0.0, inf]
+    weight_decay			    0.00001                             [0.0, inf]
+    train_val_split_ratio	    0.8                                 [0.0, 1.0]
+    frame_num				    8                                   [1, inf]
+    frame_method			    space_fixed		                    [random, spaced_fixed, spaced_varied]
+    spatial_size			    224                                 [1, inf]
+    freeze					    False                               [False, True]
+    dropout					    0.5                                 [0.0, 1.0]
+    topology				    [512, 256]                          list of ints [1, inf] each
+    output					    ./losses.png                        .png file path
+    annotation_path			    ./final_annotations_dict.pkl        .pkl file path
+    attention_type			    divided_space_time                  [divided_space_time, space_only, joint_space_time]
+    optimizer				    AdamW	                            [Adam, AdamW]
+    patch_size				    16                                  [1, inf]
+    embed_dim				    768                                 [1, inf]
+    pretrained_model		    scratch                             path/to/model.pyth or scratch
+    evaluate                    False                               [False, True]
+"""
 
 
 import argparse
@@ -66,6 +97,15 @@ def get_cmdline_arguments() -> Dict[str, Any]:
         type=bool,
         help="Whether to use GPU for training. Defaults to True.",
         default=True,
+        required=False
+    )
+    
+    parser.add_argument(
+        "-eval",
+        "--evaluate",
+        type=bool,
+        help="Whether to use evaluate on testing dataset. Defaults to False.",
+        default=False,
         required=False
     )
     
@@ -145,7 +185,7 @@ def get_cmdline_arguments() -> Dict[str, Any]:
         "-at",
         "--attention_type",
         type=str,
-        help="The type of attention used in the transformer. Default value is 'divided_space_time'. Possible values are: ['divided_space_time', 'space_only','joint_space_time']",
+        help="The type of attention used in the transformer. Default value is 'divided_space_time'. Possible values are: ['divided_space_time', 'space_only', 'joint_space_time']",
         default="divided_space_time",
         required=False
     )
@@ -301,7 +341,7 @@ def get_cmdline_arguments() -> Dict[str, Any]:
         logging.warning(f"The parameter attention_type uses an invalid value ({args['attention_type']}). Will use 'divided_space_time' instead.")
         args["attention_type"] = "divided_space_time"
         
-    if isinstance(args["videos"], str) and args["videos"].lower() == "all":
+    if isinstance(args["videos"][0], str) and args["videos"][0].lower() == "all":
         args["videos"] = [1, 2, 3, 4, 5, 6, 7, 9, 10, 13, 14, 17, 18, 22, 26]
     else:
         args["videos"] = list(map(int, args["videos"]))
@@ -330,7 +370,7 @@ class VideoClip:
     # If the image had 80 frames, and we need to sample only 8 frames then:
     #   random- will sample 8 indices from [0, 79] and use the sorted values as the clip values
     #   spaced_fixed- will yield [0, 10, 20, ..., 60, 70] since the step_size=80/8
-    #   space_varied- its similar to spaced_fixed, except the entire list is shifted by a random value [0, step_size-1]
+    #   spaced_varied- its similar to spaced_fixed, except the entire list is shifted by a random value [0, step_size-1]
     FRAME_SELECTION_METHOD = "spaced_fixed"
     
     # Spatial dimensions that each clip will be resized to
@@ -387,15 +427,18 @@ class VideoClip:
             frame_range = range(self.start_frame, self.end_frame + 1)
             frame_indices = sorted(random.sample(frame_range, self.NUM_FRAMES))
         else: # spaced_fixed (default) or spaced_varied
-            step_size = self.clip_num_frames / self.NUM_FRAMES
+            step_size = (self.clip_num_frames-1) / self.NUM_FRAMES
             offset = self.start_frame
             if self.FRAME_SELECTION_METHOD == "spaced_varied":
                 offset += random.randint(0, self.NUM_FRAMES - 1)
-            frame_indices = [round(i * step_size + offset) for i in range(self.NUM_FRAMES)]
+            frame_indices = [int(i * step_size + offset) for i in range(self.NUM_FRAMES)]
         
         # Load the images from disk and preprocess them into a tensor
         for idx, frame_num in enumerate(frame_indices):
             img_path = os.path.join(*[self.FRAME_ROOT_DIR, f"{self.video_num:02d}", f"{frame_num:06d}.jpg"])
+            if not os.path.exists(img_path):
+                logging.error(f"File does not exist: {img_path}. frame_indices={frame_indices}, step_size={step_size}, offset={offset}, start={self.start_frame}, end={self.end_frame}")
+                sys.exit()
             img = Image.open(img_path).resize((self.SPATIAL_SIZE, self.SPATIAL_SIZE))
             tensor = self.CONVERT_TENSOR(img).type(dtype=torch.float32) # (channels, height, width)
             clip[:, idx, :, :] = tensor
@@ -856,6 +899,7 @@ def main():
     args = get_cmdline_arguments()
     
     logging.info("--- Start of Program ---")
+    logging.info(f"Command-Line Args: {args}")
     
     # Prepare dataset
     annotations = load_annotations(args["annotation_path"])
@@ -872,8 +916,9 @@ def main():
     train_losses, val_losses = train(model, device, train_data, val_data, args)
     
     # Evaluate the model
-    evaluate(model, device, test_data)
-    plot_losses(args["output"], train_losses, val_losses)
+    if args["evaluate"]:
+        evaluate(model, device, test_data)
+        plot_losses(args["output"], train_losses, val_losses)
     
     logging.info("--- End of Program ---")
 
