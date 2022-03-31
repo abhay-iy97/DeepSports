@@ -127,3 +127,72 @@ Next, you may want to modify the resources allocation of the training job (gpu, 
 ```
 sbatch "/home1/$USER/DeepSports/job_files/train_model.job"
 ```
+
+# Final Directory View
+
+The following tree-view is what you should expect at the end of your setup.
+
+```bash
+.
+├── /home1/
+│   ├── <username>/
+│       ├── DeepSports/
+│            ├── data_preparation/
+│            |   └── ...
+│            ├── job_files/
+│            |   └── ...
+│            ├── training/
+│            |   └── ...
+│            └── model_train_config.sh
+│
+├── /scratch1/
+│   ├── <username>/
+│       ├── DeepSports_dataset/
+│            ├── whole_videos/
+│            |   ├── 01.mp4
+│            |   ├── 02.mp4
+│            |   ├── 03.mp4
+│            |   ├── 04.mp4
+│            |   ├── 05.mp4
+│            |   ├── 06.mp4
+│            |   ├── 07.mp4
+│            |   ├── 09.mp4
+│            |   ├── 10.mp4
+│            |   ├── 13.mp4
+│            |   ├── 14.mp4
+│            |   ├── 17.mp4
+│            |   ├── 18.mp4
+│            |   ├── 22.mp4
+│            |   └── 26.mp4
+│            └── whole_videos_frames/
+│                ├── 01/
+│                |   └── ...
+│                ├── 02/
+│                |   └── ...
+│                ├── 03/
+│                |   └── ...
+│                ├── 04/
+│                |   └── ...
+│                ├── 05/
+│                |   └── ...
+│                ├── 06/
+│                |   └── ...
+│                ├── 07/
+│                |   └── ...
+│                ├── 09/
+│                |   └── ...
+│                ├── 10/
+│                |   └── ...
+│                ├── 13/
+│                |   └── ...
+│                ├── 14/
+│                |   └── ...
+│                ├── 17/
+│                |   └── ...
+│                ├── 18/
+│                |   └── ...
+│                ├── 22/
+│                |   └── ...
+│                └── 26/
+│                    └── ...
+```
