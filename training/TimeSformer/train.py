@@ -740,7 +740,7 @@ def create_model(device: torch.device, args: Dict[str, Any]) -> DivingViT:
 ################################## Training ##################################
 
 
-def train(model: DivingViT, device: torch.device, train_data_loader: DataLoader, val_data_loader: DataLoader, args: Dict[str, Any]) -> Tuple[List[float], List[float]]:
+def train(model: DivingViT, device: torch.device, train_data_loader: DataLoader, val_data_loader: DataLoader, args: Dict[str, Any]) -> Tuple[List[float], List[float], List[float]]:
     """
     Trains the model on the specified device on the training dataset. Then evaluates on the validation dataset.
     Returns the training and validation losses per epoch.
@@ -753,7 +753,7 @@ def train(model: DivingViT, device: torch.device, train_data_loader: DataLoader,
         args (Dict[str, Any]): commandline arguments
 
     Returns:
-        Tuple[List[float], List[float]]: a tuple of training and validation losses per epoch
+        Tuple[List[float], List[float], List[float]]: a tuple of training losses, validation losses, and validation spearman correlation per epoch
     """
     logging.info("Training model...")
     
@@ -767,6 +767,7 @@ def train(model: DivingViT, device: torch.device, train_data_loader: DataLoader,
     
     train_losses = []
     val_losses = []
+    val_spearman_correlations = []
     epochs = args["epochs"]
     
     for epoch in range(epochs):
@@ -819,11 +820,12 @@ def train(model: DivingViT, device: torch.device, train_data_loader: DataLoader,
         spearman_target = torch.cat(spearman_targets, dim=0) # concat across batches
         spearman_output = spearman_output[:, 0] * spearman_output[:, 1] * 30 # get final score
         spearman_target = spearman_target[:, 0] * spearman_target[:, 1] * 30 # get final score
+        val_spearman_correlations.append(spearman_correlation(spearman_target, spearman_output))
     
         # Log losses and spearman correlation
         logging.info(f"Epoch {epoch+1}/{epochs} \t train_loss: {np.mean(train_loss):.4f} \t val_loss: {np.mean(val_loss):.4f} \t val_spcoeff: {spearman_correlation(spearman_target, spearman_output):.4f}")
     
-    return train_losses, val_losses
+    return train_losses, val_losses, val_spearman_correlations
     
 
 ################################## Evaluation ##################################
@@ -870,7 +872,7 @@ def evaluate(model: DivingViT, device: torch.device, test_data_loader: DataLoade
 
 
 # Save the plotted training and validation losses to the specified filepath
-def plot_losses(fig_filepath: str, train_losses: List[float], val_losses: List[float]) -> None:
+def plot_losses(fig_filepath: str, train_losses: List[float], val_losses: List[float], val_spearman_correlations: List[float]) -> None:
     """
     Save the plotted training and validation losses to the specified filepath
     
@@ -878,6 +880,7 @@ def plot_losses(fig_filepath: str, train_losses: List[float], val_losses: List[f
         fig_filepath (str): filepath to save the plot to
         train_losses (List[float]): list of training losses per epoch
         val_losses (List[float]): list of validation losses per epoch
+        val_spearman_correlations (List[float]): list of validation spearman correlations per epoch
     """
     logging.info("Plotting losses...")
     
@@ -889,14 +892,21 @@ def plot_losses(fig_filepath: str, train_losses: List[float], val_losses: List[f
     ax1 = plt.subplot(121)
     ax1.plot(xvalues, train_losses, label="train_loss")
     ax1.plot(xvalues, val_losses, label="val_loss")
-    ax1.title.set_text("Loss")
+    ax1.title.set_text("Loss per Epoch")
     ax1.legend()
     ax1.set_ylabel("Loss")
     ax1.set_xlabel("Epoch")
     
+    ax2 = plt.subplot(122)
+    ax2.plot(xvalues, val_spearman_correlations, label="Spearman Correlation")
+    ax2.title.set_text("Spearman Correlation per Epoch")
+    ax2.legend()
+    ax2.set_ylabel("Spearman Correlation")
+    ax2.set_xlabel("Epoch")
+    
     plt.savefig(fig_filepath)
     
-    logging.info(f"Saved loss figure to {fig_filepath}")
+    logging.info(f"Saved figure to {fig_filepath}")
 
 
 ################################## Main Entry Point ##################################
@@ -922,12 +932,12 @@ def main():
     model = create_model(device, args)
     
     # Train the model
-    train_losses, val_losses = train(model, device, train_data, val_data, args)
+    train_losses, val_losses, val_spearman_correlations = train(model, device, train_data, val_data, args)
     
     # Evaluate the model
     if args["evaluate"]:
         evaluate(model, device, test_data)
-        plot_losses(args["output"], train_losses, val_losses)
+        plot_losses(args["output"], train_losses, val_losses, val_spearman_correlations)
     
     logging.info("--- End of Program ---")
 
