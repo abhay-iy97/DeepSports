@@ -52,6 +52,7 @@ import numpy as np
 from timesformer.models.vit import TimeSformer
 import matplotlib.pyplot as plt
 import random
+import gc
 
 
 # Annotation Alias, matches the format of the contents in the annotations .pkl file
@@ -436,8 +437,8 @@ class VideoClip:
             args (Dict[str, Any]): the commandline arguments.
         """
         
-        if start_frame >= end_frame:
-            logging.warning(f"Invalid clip for {video_num:02d}, with start_frame ({start_frame}) >= end_frame {end_frame}")
+        if start_frame > end_frame:
+            logging.warning(f"Invalid clip for {video_num:02d}, with start_frame ({start_frame}) > end_frame {end_frame}")
         
         self.video_num = video_num
         self.start_frame = start_frame
@@ -681,7 +682,12 @@ class DivingViT(nn.Module):
         
         self.timesformer = timesformer
         if freeze:
-            timesformer.requires_grad_ = False
+            # Freeze all layers
+            for param in timesformer.parameters():
+                param.requires_grad = False
+            # Except last layer
+            for param in timesformer.model.head.parameters():
+                param.requires_grad = True
         
         # Build the MLP linear net, starts with 768, ... (mlp_topology) ..., 2
         net = []
@@ -706,8 +712,8 @@ class DivingViT(nn.Module):
         Returns:
             torch.Tensor: the normalized score and the difficulty in the shape (2,)
         """
-        out = self.timesformer(x)  # (batch, 768)
-        out = self.stacked_mlp(out)     # (batch, 2)
+        out = self.timesformer(x)   # (batch, 768)
+        out = self.stacked_mlp(out) # (batch, 2)
         return out
 
 
@@ -812,6 +818,12 @@ def train(model: DivingViT, device: torch.device, train_data_loader: DataLoader,
             scaler.update()
             
             train_loss.append(loss.item())
+            
+            # Free memory
+            del inputs, targets, outputs, loss
+            gc.collect()
+            if args["gpu"]:
+                torch.cuda.empty_cache()
         train_losses.append(np.mean(train_loss))
         
         # Validation
