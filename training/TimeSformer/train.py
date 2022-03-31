@@ -13,7 +13,7 @@
     test_path				    ./test_split_0.pkl                  .pkl file path
     batch_size				    4                                   [1, inf]
     epochs					    20                                  [1, inf]
-    learning_rate			    0.0001                              [0.0, inf]
+    learning_rate			    0.00001                              [0.0, inf]
     weight_decay			    0.00001                             [0.0, inf]
     train_val_split_ratio	    0.8                                 [0.0, 1.0]
     frame_num				    8                                   [1, inf]
@@ -30,6 +30,7 @@
     embed_dim				    768                                 [1, inf]
     pretrained_model		    scratch                             path/to/model.pyth or scratch
     evaluate                    False                               [False, True]
+    videos                      all                                 all or list of directories (i.e. 01 02)
 """
 
 
@@ -39,7 +40,6 @@ import os
 import pickle
 import sys
 from typing import Any, Dict, List, Tuple
-from pathlib import Path
 import torch
 from torch import nn
 from torch import optim
@@ -87,7 +87,7 @@ def get_cmdline_arguments() -> Dict[str, Any]:
         type=str,
         nargs="+",
         help="The videos directory name to use. Default value is 'all'. To use select directories, only list their directory names, i.e. '-vid 01 02 03'",
-        default="all",
+        default=["all"],
         required=False
     )
     
@@ -158,8 +158,8 @@ def get_cmdline_arguments() -> Dict[str, Any]:
         "-ep",
         "--epochs",
         type=int,
-        help="The number of epochs used in training. Default value is 20.",
-        default=20,
+        help="The number of epochs used in training. Default value is 5.",
+        default=5,
         required=False
     )
     
@@ -167,8 +167,8 @@ def get_cmdline_arguments() -> Dict[str, Any]:
         "-lr",
         "--learning_rate",
         type=float,
-        help="The learning rate used in training. Default value is 0.0001 (1e-4).",
-        default=1e-4,
+        help="The learning rate used in training. Default value is 0.00001 (1e-5).",
+        default=1e-5,
         required=False
     )
     
@@ -311,27 +311,25 @@ def get_cmdline_arguments() -> Dict[str, Any]:
         level=numeric_loglevel,
         datefmt='%Y-%m-%d %H:%M:%S')
     
-    # Get directory of this script
-    directory_path = Path(__file__).parent.absolute()
+    # Convert any relative paths to absolute paths
+    args["root_dir"] = os.path.abspath(args["root_dir"])
+    args["annotation_path"] = os.path.abspath(args["annotation_path"])
+    args["train_path"] = os.path.abspath(args["train_path"])
+    args["test_path"] = os.path.abspath(args["test_path"])
+    args["test_path"] = os.path.abspath(args["test_path"])
+    args["output"] = os.path.abspath(args["output"])
     
-    # Set the defaults of the commandline arguments to be relative to current directory
-    if args["root_dir"] == "./":
-        args["root_dir"] = directory_path
-    if args["annotation_path"] == "./final_annotations_dict.pkl":
-        args["annotation_path"] = os.path.join(directory_path, "final_annotations_dict.pkl")
-    if args["pretrained_model"].startswith("./"):
-        args["pretrained_model"] = os.path.join(directory_path, args["pretrained_model"][2:])
-    if args["train_path"] == "./train_split_0.pkl":
-        args["train_path"] = os.path.join(directory_path, "train_split_0.pkl")
-    if args["test_path"] == "./test_split_0.pkl":
-        args["test_path"] = os.path.join(directory_path, "test_split_0.pkl")
-    if args["output"] == "./losses.png":
-        args["output"] = os.path.join(directory_path, "losses.png")
+    # Special case for pretrained model's path. If scratch, we dont use a path; otherwise, resolve path to absolute
+    if args["pretrained_model"].lower() == "scratch":
+        args["pretrained_model"] = args["pretrained_model"].lower()
+    else:
+        args["pretrained_model"] = os.path.abspath(args["pretrained_model"])
        
-    # Lowercase
+    # Lowercase strings to allow case-insensitive input
     args["optimizer"] = args["optimizer"].lower()
     args["frame_method"] = args["frame_method"].lower()
     args["attention_type"] = args["attention_type"].lower()
+    args["videos"] = [x.lower() for x in args["videos"]]
         
     # Ensure validation of arguments
     if args["frame_method"] not in ["random", "spaced_fixed", "spaced_varied"]:
@@ -341,12 +339,41 @@ def get_cmdline_arguments() -> Dict[str, Any]:
         logging.warning(f"The parameter attention_type uses an invalid value ({args['attention_type']}). Will use 'divided_space_time' instead.")
         args["attention_type"] = "divided_space_time"
         
-    if isinstance(args["videos"][0], str) and args["videos"][0].lower() == "all":
+    if args["videos"][0] == "all":
         args["videos"] = [1, 2, 3, 4, 5, 6, 7, 9, 10, 13, 14, 17, 18, 22, 26]
     else:
         args["videos"] = list(map(int, args["videos"]))
         
     return args
+
+
+def _get_ranks(x: torch.Tensor) -> torch.Tensor:
+    """
+    Calculates the rank of the given tensor.
+    Credit: https://discuss.pytorch.org/t/spearmans-correlation/91931/5
+    """
+    tmp = x.argsort()
+    ranks = torch.zeros_like(tmp)
+    ranks[tmp] = torch.arange(len(x), device=x.device)
+    return ranks
+
+
+def spearman_correlation(x: torch.Tensor, y: torch.Tensor):
+    """
+    Compute the spearman correlation between two 1D tensors of shape (batch_size, ).
+    Credit: https://discuss.pytorch.org/t/spearmans-correlation/91931/5
+    
+    Args:
+        x: Shape (batch_size, )
+        y: Shape (batch_size, )
+    """
+    x_rank = _get_ranks(x)
+    y_rank = _get_ranks(y)
+    
+    n = x.size(0)
+    upper = 6 * torch.sum((x_rank - y_rank).pow(2))
+    down = n * (n ** 2 - 1.0)
+    return 1.0 - (upper / down)
 
 
 ################################## Data Preparation ##################################
@@ -361,7 +388,7 @@ class VideoClip:
     CONVERT_TENSOR = transforms.ToTensor()
     
     # The root directory path to the frames on disk (should be the one that includes the 01/ 02/ ... directories)
-    FRAME_ROOT_DIR = "wtf"
+    FRAME_ROOT_DIR = "./"
     
     # The number of frames each clip will have
     NUM_FRAMES = 8
@@ -677,19 +704,19 @@ def create_model(device: torch.device, args: Dict[str, Any]) -> DivingViT:
     logging.info("Creating model...")
     
     # Create TimeSformer (either pretrained or from scratch)
-    if args["pretrained_model"].lower() == "scratch":
+    if args["pretrained_model"] == "scratch":
         timesformer = TimeSformer(
             img_size=args["spatial_size"],
             num_classes=args["embed_dim"],
             num_frames=args["frame_num"],
-            attention_type=args["attention_type"].lower()
+            attention_type=args["attention_type"]
         )
     else:
         timesformer = TimeSformer(
             img_size=args["spatial_size"],
             num_classes=args["embed_dim"],
             num_frames=args["frame_num"],
-            attention_type=args["attention_type"].lower(),
+            attention_type=args["attention_type"],
             pretrained_model=args["pretrained_model"]
         )
     
@@ -768,6 +795,8 @@ def train(model: DivingViT, device: torch.device, train_data_loader: DataLoader,
         
         # Validation
         val_loss = []
+        spearman_outputs = []
+        spearman_targets = []
         model.eval()
         with torch.no_grad():
             for (inputs, targets) in val_data_loader:
@@ -780,44 +809,24 @@ def train(model: DivingViT, device: torch.device, train_data_loader: DataLoader,
                     loss = F.mse_loss(outputs, targets)
                 
                 val_loss.append(loss.item())
+                spearman_outputs.append(outputs)
+                spearman_targets.append(targets)
+        
         val_losses.append(np.mean(val_loss))
         
-        # logging.info losses
-        logging.info(f"Epoch {epoch+1}/{epochs} \t train_loss: {np.mean(train_loss):.4f} \t val_loss: {np.mean(val_loss):.4f}")
+        # Compute spearman coefficient
+        spearman_output = torch.cat(spearman_outputs, dim=0) # concat across batches
+        spearman_target = torch.cat(spearman_targets, dim=0) # concat across batches
+        spearman_output = spearman_output[:, 0] * spearman_output[:, 1] * 30 # get final score
+        spearman_target = spearman_target[:, 0] * spearman_target[:, 1] * 30 # get final score
+    
+        # Log losses and spearman correlation
+        logging.info(f"Epoch {epoch+1}/{epochs} \t train_loss: {np.mean(train_loss):.4f} \t val_loss: {np.mean(val_loss):.4f} \t val_spcoeff: {spearman_correlation(spearman_target, spearman_output):.4f}")
     
     return train_losses, val_losses
     
 
 ################################## Evaluation ##################################
-
-
-def _get_ranks(x: torch.Tensor) -> torch.Tensor:
-    """
-    Calculates the rank of the given tensor.
-    Credit: https://discuss.pytorch.org/t/spearmans-correlation/91931/5
-    """
-    tmp = x.argsort()
-    ranks = torch.zeros_like(tmp)
-    ranks[tmp] = torch.arange(len(x), device=x.device)
-    return ranks
-
-
-def spearman_correlation(x: torch.Tensor, y: torch.Tensor):
-    """
-    Compute the spearman correlation between two 1D tensors of shape (batch_size, ).
-    Credit: https://discuss.pytorch.org/t/spearmans-correlation/91931/5
-    
-    Args:
-        x: Shape (batch_size, )
-        y: Shape (batch_size, )
-    """
-    x_rank = _get_ranks(x)
-    y_rank = _get_ranks(y)
-    
-    n = x.size(0)
-    upper = 6 * torch.sum((x_rank - y_rank).pow(2))
-    down = n * (n ** 2 - 1.0)
-    return 1.0 - (upper / down)
 
 
 def evaluate(model: DivingViT, device: torch.device, test_data_loader: DataLoader) -> None:
@@ -850,14 +859,14 @@ def evaluate(model: DivingViT, device: torch.device, test_data_loader: DataLoade
             spearman_outputs.append(outputs)
             spearman_targets.append(targets)
         
-    logging.info(f"test_loss: {np.mean(test_loss):.4f}")
-    
     # Compute spearman coefficient
     spearman_output = torch.cat(spearman_outputs, dim=0) # concat across batches
     spearman_target = torch.cat(spearman_targets, dim=0) # concat across batches
     spearman_output = spearman_output[:, 0] * spearman_output[:, 1] * 30 # get final score
     spearman_target = spearman_target[:, 0] * spearman_target[:, 1] * 30 # get final score
-    logging.info(f"spearman_coeff: {spearman_correlation(spearman_target, spearman_output):.4f}")
+    
+    # Log loss and spearman correlation
+    logging.info(f"test_loss: {np.mean(test_loss):.4f} \t test_spcoeff: {spearman_correlation(spearman_target, spearman_output):.4f}")
 
 
 # Save the plotted training and validation losses to the specified filepath
