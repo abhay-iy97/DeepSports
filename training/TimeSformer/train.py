@@ -1,6 +1,6 @@
 # For help type 'python train.py -h' in the command-line.
 # Example:
-# python train.py -log INFO --root_dir path\to\whole_videos_frames --pretrained_model path\to\model.pyth --batch_size 4 --epochs 5 --learning_rate 0.00001 --weight_decay 0.00001 --optimizer AdamW --dropout 0.5 --topology 512 256 --frame_method spaced_varied
+# python train.py -log INFO --root_dir path\to\whole_videos_frames --pretrained_model path\to\model.pyth --batch_size 4 --epochs 5 --learning_rate 0.00001 --weight_decay 0.00001 --optimizer AdamW --dropout 0.5 0.5 --topology 512 256 --frame_method spaced_varied
 
 
 """
@@ -20,7 +20,7 @@
     frame_method			    space_fixed		                    [random, spaced_fixed, spaced_varied]
     spatial_size			    224                                 [1, inf]
     freeze					    False                               [False, True]
-    dropout					    0.5                                 [0.0, 1.0]
+    dropout					    [0.5, 0.5]                          list of drop prob, [0.0, 1.0] each. dropout is before the linear
     topology				    [512, 256]                          list of ints [1, inf] each
     output					    ./losses.png                        .png file path
     annotation_path			    ./final_annotations_dict.pkl        .pkl file path
@@ -277,8 +277,9 @@ def get_cmdline_arguments() -> Dict[str, Any]:
         "-dr",
         "--dropout",
         type=float,
-        help="The dropout value used in MLP. Default value is 0.5.",
-        default=0.5,
+        help="The dropout value per layer in MLP. Default value is [0.5, 0.5].",
+        default=[0.5, 0.5],
+        nargs="+",
         required=False
     )
     
@@ -340,6 +341,9 @@ def get_cmdline_arguments() -> Dict[str, Any]:
     if args["attention_type"] not in ["divided_space_time", "space_only","joint_space_time"]:
         logging.warning(f"The parameter attention_type uses an invalid value ({args['attention_type']}). Will use 'divided_space_time' instead.")
         args["attention_type"] = "divided_space_time"
+    if len(args["topology"]) != len(args["dropout"]):
+        logging.warning(f"Dropouts and Topology do not match. Topology: {args['topology']}. Dropout: {args['dropout']}. Using dropout of 0.5 for each layer instead.")
+        args['dropout'] = [0.5] * len(args["topology"])
         
     if args["videos"][0] == "all":
         args["videos"] = [1, 2, 3, 4, 5, 6, 7, 9, 10, 13, 14, 17, 18, 22, 26]
@@ -668,15 +672,15 @@ def load_dataset(annotations: Annotation, args: Dict[str, Any]) -> Tuple[DataLoa
 
 
 class DivingViT(nn.Module):
-    def __init__(self, timesformer: TimeSformer, mlp_topology: List[int], drop_prob:float=0.5, freeze:bool=False) -> None:
+    def __init__(self, timesformer: TimeSformer, mlp_topology: List[int], dropout: List[float], freeze:bool=False) -> None:
         """
         Builds upon the TimeSformer model with additional MLP layers that are user-defined.
 
         Args:
             timesformer (TimeSformer): A pretrained instance of TimeSformer of 8 frames and 224x224 (or from scratch).
             mlp_topology (List[int]): The number of hidden neurons in the MLP layer after the pretrained model (excluding the 768 from the model and the 2 at the output).
-            drop_prob (float, optional): Drop probability for dropout after the TimeSformer model. Defaults to 0.5.
-            freeze (bool, optional): Whether to freeze the pretrained model weights or also add them to the gradient updates. Defaults to False.
+            dropout (List[float]): Drop probability for dropout for each MLP layer after the TimeSformer model.
+            freeze (bool, optional): Whether to freeze the pretrained model weights (except its head) or also add them to the gradient updates. Defaults to False.
         """
         super().__init__()
         
@@ -692,11 +696,12 @@ class DivingViT(nn.Module):
         # Build the MLP linear net, starts with 768, ... (mlp_topology) ..., 2
         net = []
         last_num_features = self.timesformer.model.embed_dim # 768
-        for num_features in mlp_topology:
+        for num_features, drop_prob in zip(mlp_topology, dropout):
             net.append(nn.Dropout(p=drop_prob))
             net.append(nn.Linear(in_features=last_num_features, out_features=num_features))
             last_num_features = num_features
-        net.append(nn.Dropout(p=drop_prob))
+        # Add last layer
+        net.append(nn.Dropout(p=dropout[-1]))
         net.append(nn.Linear(in_features=last_num_features, out_features=2))
         
         self.stacked_mlp = nn.Sequential(*net)
@@ -749,7 +754,7 @@ def create_model(device: torch.device, args: Dict[str, Any]) -> DivingViT:
     # Create our diving model
     model = DivingViT(
         timesformer=timesformer,
-        drop_prob=args["dropout"],
+        dropout=args["dropout"],
         freeze=args["freeze"],
         mlp_topology=args["topology"]
     )
