@@ -99,7 +99,7 @@ def remove_unused_frames(root_directory: str, used_frames: UsedFrames, video_dir
         logging.error(f"The parsed used frames is None")
         sys.exit(9)
         
-    if isinstance(video_directories, str) and video_directories.lower() == "all":
+    if video_directories[0] == "all":
         video_directories: List[str] = ["01", "02", "03", "04", "05", "06", "07", "09", "10", "13", "14", "17", "18", "22", "26"]
     
     total_stats = {"total_files": 0, "removed_files": 0, "total_size": 0, "removed_size": 0}
@@ -192,7 +192,7 @@ def main():
         type=str,
         nargs="+",
         help="The videos directory name to filter the frames for. Default value is 'all', which will filter the frames from all videos present. To filter select directories, only list their directory names, i.e. '-vid 01 02 03'",
-        default="all",
+        default=["all"],
         required=False
     )
     
@@ -201,7 +201,7 @@ def main():
     arg_loglevel = args["loglevel"]
     arg_root_dir = args["root_dir"]
     arg_annotation_path = args["annotation_path"]
-    arg_videos = args["videos"]
+    arg_videos = [x.lower() for x in args["videos"]]
     
     # Get directory of this script
     directory_path = Path(__file__).parent.absolute()

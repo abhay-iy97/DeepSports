@@ -1,4 +1,6 @@
 #!/bin/bash
+mkdir -p whole_videos
+cd whole_videos
 curl https://www.dropbox.com/sh/rt2eo97qt2bnrd4/AAAKpkawpb4mJJ4nhQmAPjxUa/01.mp4?dl=1 -L -o 01.mp4
 curl https://www.dropbox.com/sh/rt2eo97qt2bnrd4/AADkp8iXHM4fgnzmy1jFwvKja/02.mp4?dl=1 -L -o 02.mp4
 curl https://www.dropbox.com/sh/rt2eo97qt2bnrd4/AAARN1DMLxf8NABpSHKvZoZsa/03.mp4?dl=1 -L -o 03.mp4
