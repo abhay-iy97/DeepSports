@@ -1,0 +1,13 @@
+# TODO:
+- 0.8 dropout after timesformer
+- multiple dropouts (like topology)
+- Loss = alpha * MSE - beta * Spearman?
+	- not differentiable, maybe it is?
+	- https://forum.numer.ai/t/differentiable-spearman-in-pytorch-optimize-for-corr-directly/2287
+	- https://discuss.pytorch.org/t/spearmans-correlation/91931/5
+- image preprocessing
+	- random cropping
+	- random rotation
+	- normalize image to -0.5 to 0.5
+- different cropping/scaling techniques?
+	- run our architecture on 448x448 models
