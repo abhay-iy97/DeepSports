@@ -21,7 +21,7 @@ git clone -b main https://github.com/abhay-iy97/DeepSports.git
 In this step, we download the videos and extract frames of the MTL-AQA videos, by running:
 
 ```
-sbatch "/home1/$USER/job_files/prepare_dataset.job"
+sbatch "/home1/$USER/DeepSports/job_files/prepare_dataset.job"
 ```
 
 To check on the job's status, you can run:
@@ -125,5 +125,5 @@ First, modify the contents of <code>/home1/\<username\>/DeepSports/model_train_c
 Next, you may want to modify the resources allocation of the training job (gpu, time, etc...) in <code>/home1/\<username\>/DeepSports/job_files/train_model.job</code> and then run:
 
 ```
-sbatch "/home1/$USER/job_files/train_model.job"
+sbatch "/home1/$USER/DeepSports/job_files/train_model.job"
 ```
