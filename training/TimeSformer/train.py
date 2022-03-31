@@ -474,10 +474,10 @@ class VideoClip:
             frame_range = range(self.start_frame, self.end_frame + 1)
             frame_indices = sorted(random.sample(frame_range, self.NUM_FRAMES))
         else: # spaced_fixed (default) or spaced_varied
-            step_size = (self.clip_num_frames-1) / self.NUM_FRAMES
+            step_size = self.clip_num_frames / self.NUM_FRAMES
             offset = self.start_frame
             if self.FRAME_SELECTION_METHOD == "spaced_varied":
-                offset += random.randint(0, self.NUM_FRAMES - 1)
+                offset += random.random() * step_size
             frame_indices = [int(i * step_size + offset) for i in range(self.NUM_FRAMES)]
         
         # Load the images from disk and preprocess them into a tensor
