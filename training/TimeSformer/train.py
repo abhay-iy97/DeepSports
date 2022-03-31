@@ -36,6 +36,7 @@
 
 import argparse
 import logging
+import math
 import os
 import pickle
 import sys
@@ -345,6 +346,25 @@ def get_cmdline_arguments() -> Dict[str, Any]:
         args["videos"] = list(map(int, args["videos"]))
         
     return args
+
+
+def convert_size(size_bytes: float) -> str:
+    """
+    Converts the size in bytes to an appropriate representation (KB, MB, GB, etc..)  
+
+    Args:
+        size_bytes (float): the size in bytes to convert
+
+    Returns:
+        str: the human readable string of the byte size
+    """
+    if size_bytes == 0:
+        return "0B"
+    size_name = ("B", "KB", "MB", "GB", "TB", "PB", "EB", "ZB", "YB")
+    i = int(math.floor(math.log(size_bytes, 1024)))
+    p = math.pow(1024, i)
+    s = round(size_bytes / p, 2)
+    return "%s %s" % (s, size_name[i])
 
 
 def _get_ranks(x: torch.Tensor) -> torch.Tensor:
@@ -820,7 +840,7 @@ def train(model: DivingViT, device: torch.device, train_data_loader: DataLoader,
         spearman_target = torch.cat(spearman_targets, dim=0) # concat across batches
         spearman_output = spearman_output[:, 0] * spearman_output[:, 1] * 30 # get final score
         spearman_target = spearman_target[:, 0] * spearman_target[:, 1] * 30 # get final score
-        val_spearman_correlations.append(spearman_correlation(spearman_target, spearman_output).cpu())
+        val_spearman_correlations.append(spearman_correlation(spearman_target, spearman_output).item())
     
         # Log losses and spearman correlation
         logging.info(f"Epoch {epoch+1}/{epochs} \t train_loss: {np.mean(train_loss):.4f} \t val_loss: {np.mean(val_loss):.4f} \t val_spcoeff: {spearman_correlation(spearman_target, spearman_output):.4f}")
@@ -927,6 +947,10 @@ def main():
     # Get the appropriate device
     device = torch.device('cuda' if args["gpu"] and torch.cuda.is_available() else 'cpu')
     logging.info(f"Using device: {device}")
+    if args["gpu"] and torch.cuda.is_available():
+        logging.info(f"GPU Total VRAM: {convert_size(torch.cuda.get_device_properties(device).total_memory)}")
+        logging.info(f"GPU Reserved VRAM: {convert_size(torch.cuda.memory_reserved(device))}")
+        logging.info(f"GPU Allocated VRAM: {convert_size(torch.cuda.memory_allocated(device))}")
     
     # Create the model
     model = create_model(device, args)
