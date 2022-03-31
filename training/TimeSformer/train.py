@@ -28,7 +28,7 @@
     optimizer				    AdamW	                            [Adam, AdamW]
     patch_size				    16                                  [1, inf]
     embed_dim				    768                                 [1, inf]
-    pretrained_model		    scratch                             path/to/model.pyth or scratch
+    pretrained_model		    none                                path/to/model.pyth or none
     evaluate                    False                               [False, True]
     videos                      all                                 all or list of directories (i.e. 01 02)
 """
@@ -222,8 +222,8 @@ def get_cmdline_arguments() -> Dict[str, Any]:
         "-pm",
         "--pretrained_model",
         type=str,
-        help="The filepath to the pretrained .pyth model for the TimeSformer. Defaults to 'scratch'. If set to 'scratch', it will train a TimeSformer from scratch.",
-        default="scratch",
+        help="The filepath to the pretrained .pyth model for the TimeSformer. Defaults to 'none'. If set to 'none', it will train a TimeSformer from scratch.",
+        default="none",
         required=False
     )
     
@@ -320,8 +320,8 @@ def get_cmdline_arguments() -> Dict[str, Any]:
     args["test_path"] = os.path.abspath(args["test_path"])
     args["output"] = os.path.abspath(args["output"])
     
-    # Special case for pretrained model's path. If scratch, we dont use a path; otherwise, resolve path to absolute
-    if args["pretrained_model"].lower() == "scratch":
+    # Special case for pretrained model's path. If none, we dont use a path; otherwise, resolve path to absolute
+    if args["pretrained_model"].lower() == "none":
         args["pretrained_model"] = args["pretrained_model"].lower()
     else:
         args["pretrained_model"] = os.path.abspath(args["pretrained_model"])
@@ -724,7 +724,7 @@ def create_model(device: torch.device, args: Dict[str, Any]) -> DivingViT:
     logging.info("Creating model...")
     
     # Create TimeSformer (either pretrained or from scratch)
-    if args["pretrained_model"] == "scratch":
+    if args["pretrained_model"] == "none":
         timesformer = TimeSformer(
             img_size=args["spatial_size"],
             num_classes=args["embed_dim"],
