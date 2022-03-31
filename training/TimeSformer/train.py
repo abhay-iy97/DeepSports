@@ -820,7 +820,7 @@ def train(model: DivingViT, device: torch.device, train_data_loader: DataLoader,
         spearman_target = torch.cat(spearman_targets, dim=0) # concat across batches
         spearman_output = spearman_output[:, 0] * spearman_output[:, 1] * 30 # get final score
         spearman_target = spearman_target[:, 0] * spearman_target[:, 1] * 30 # get final score
-        val_spearman_correlations.append(spearman_correlation(spearman_target, spearman_output))
+        val_spearman_correlations.append(spearman_correlation(spearman_target, spearman_output).cpu())
     
         # Log losses and spearman correlation
         logging.info(f"Epoch {epoch+1}/{epochs} \t train_loss: {np.mean(train_loss):.4f} \t val_loss: {np.mean(val_loss):.4f} \t val_spcoeff: {spearman_correlation(spearman_target, spearman_output):.4f}")
