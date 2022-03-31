@@ -1,0 +1,28 @@
+#!/bin/bash
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
+#SBATCH --partition=gpu
+#SBATCH --cpus-per-task=8
+#SBATCH --mem=32GB
+#SBATCH --time=02:00:00
+#SBATCH --account=xiangren_818
+
+echo "Loading cuda..."
+module load cuda/10.2.89
+CONDA_PATH=$(conda info | grep -i 'base environment' | awk '{print $4}')
+source $CONDA_PATH/etc/profile.d/conda.sh
+
+echo "Initializing conda..."
+conda init
+
+echo "Activating environment..."
+conda activate timesformer
+
+echo "Running model_train_config.sh"
+sh "/home1/$USER/DeepSports/model_train_config.sh"
+
+conda deactivate
+
+echo "Done"
+
+exit
