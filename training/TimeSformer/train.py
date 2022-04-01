@@ -96,18 +96,18 @@ def get_cmdline_arguments() -> Dict[str, Any]:
     parser.add_argument(
         "-gpu",
         "--gpu",
-        type=bool,
+        type=str,
         help="Whether to use GPU for training. Defaults to True.",
-        default=True,
+        default='True',
         required=False
     )
     
     parser.add_argument(
         "-eval",
         "--evaluate",
-        type=bool,
+        type=str,
         help="Whether to use evaluate on testing dataset. Defaults to False.",
-        default=False,
+        default='False',
         required=False
     )
     
@@ -267,9 +267,9 @@ def get_cmdline_arguments() -> Dict[str, Any]:
     parser.add_argument(
         "-f",
         "--freeze",
-        type=bool,
+        type=str,
         help="Whether to freeze the gradients in the TimeSformer model. Defaults to False.",
-        default=False,
+        default='False',
         required=False
     )
     
@@ -313,6 +313,11 @@ def get_cmdline_arguments() -> Dict[str, Any]:
         format='%(asctime)s %(levelname)-8s %(message)s',
         level=numeric_loglevel,
         datefmt='%Y-%m-%d %H:%M:%S')
+    
+    # Convert booleans to the correct type (workaround of argparse)
+    args["gpu"] = bool(args["gpu"].lower() == "true")
+    args["evaluate"] = bool(args["evaluate"].lower() == "true")
+    args["freeze"] = bool(args["freeze"].lower() == "true")
     
     # Convert any relative paths to absolute paths
     args["root_dir"] = os.path.abspath(args["root_dir"])
