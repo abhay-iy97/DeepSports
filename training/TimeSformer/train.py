@@ -96,18 +96,18 @@ def get_cmdline_arguments() -> Dict[str, Any]:
     parser.add_argument(
         "-gpu",
         "--gpu",
-        type=bool,
+        type=str,
         help="Whether to use GPU for training. Defaults to True.",
-        default=True,
+        default='True',
         required=False
     )
     
     parser.add_argument(
         "-eval",
         "--evaluate",
-        type=bool,
+        type=str,
         help="Whether to use evaluate on testing dataset. Defaults to False.",
-        default=False,
+        default='False',
         required=False
     )
     
@@ -267,9 +267,9 @@ def get_cmdline_arguments() -> Dict[str, Any]:
     parser.add_argument(
         "-f",
         "--freeze",
-        type=bool,
+        type=str,
         help="Whether to freeze the gradients in the TimeSformer model. Defaults to False.",
-        default=False,
+        default='False',
         required=False
     )
     
@@ -314,6 +314,11 @@ def get_cmdline_arguments() -> Dict[str, Any]:
         level=numeric_loglevel,
         datefmt='%Y-%m-%d %H:%M:%S')
     
+    # Convert booleans to the correct type (workaround of argparse)
+    args["gpu"] = bool(args["gpu"].lower() == "true")
+    args["evaluate"] = bool(args["evaluate"].lower() == "true")
+    args["freeze"] = bool(args["freeze"].lower() == "true")
+    
     # Convert any relative paths to absolute paths
     args["root_dir"] = os.path.abspath(args["root_dir"])
     args["annotation_path"] = os.path.abspath(args["annotation_path"])
@@ -343,7 +348,7 @@ def get_cmdline_arguments() -> Dict[str, Any]:
         args["attention_type"] = "divided_space_time"
     if len(args["topology"]) != len(args["dropout"]):
         logging.warning(f"Dropouts and Topology do not match. Topology: {args['topology']}. Dropout: {args['dropout']}. Using dropout of 0.5 for each layer instead.")
-        args['dropout'] = [0.5] * len(args["topology"])
+        args["dropout"] = [0.5] * len(args["topology"])
         
     if args["videos"][0] == "all":
         args["videos"] = [1, 2, 3, 4, 5, 6, 7, 9, 10, 13, 14, 17, 18, 22, 26]
