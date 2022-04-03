@@ -18,7 +18,13 @@ git clone -b main https://github.com/abhay-iy97/DeepSports.git
 
 # Dataset Preparation
 
-In this step, we download the videos and extract frames of the MTL-AQA videos, by running:
+In this step, we download the videos by running the following command. Note that it is not part of a job script because job's are not able to CURL from outside sources.
+
+```
+sh "/home1/$USER/DeepSports/data_preparation/download_videos.sh"
+```
+
+After that is done, to extract frames of the MTL-AQA videos, run:
 
 ```
 sbatch "/home1/$USER/DeepSports/job_files/prepare_dataset.job"
