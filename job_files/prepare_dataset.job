@@ -19,7 +19,7 @@ cp "/home1/$USER/DeepSports/data_preparation/download_videos.sh" -t "/scratch1/$
 cp "/home1/$USER/DeepSports/data_preparation/frame_extractor.sh" -t "/scratch1/$USER/DeepSports_dataset/"
 
 echo "Downloading videos..."
-sh "/scratch1/$USER/DeepSports_dataset/download_video.sh"
+sh "/scratch1/$USER/DeepSports_dataset/download_videos.sh"
 
 echo "Extracting frames..."
 sh "/scratch1/$USER/DeepSports_dataset/frame_extractor.sh"
