@@ -426,8 +426,8 @@ class VideoClip:
     # The method in which the frames are selected. Values: ['random', 'spaced_fixed', 'spaced_varied']
     # If the image had 80 frames, and we need to sample only 8 frames then:
     #   random- will sample 8 indices from [0, 79] and use the sorted values as the clip values
-    #   spaced_fixed- will yield [0, 10, 20, ..., 60, 70] since the step_size=80/8
-    #   spaced_varied- its similar to spaced_fixed, except the entire list is shifted by a random value [0, step_size-1]
+    #   spaced_fixed- will yield [0+k, 10+k, 20+k, ..., 60+k, 70+k] where k=random[0,9] since the step_size=80/8
+    #   spaced_varied- its similar to spaced_fixed, except k is different for each subclip, i.e. k0, k1, ..., kn are all random[0,9]
     FRAME_SELECTION_METHOD = "spaced_fixed"
     
     # Spatial dimensions that each clip will be resized to
@@ -483,12 +483,14 @@ class VideoClip:
         if self.FRAME_SELECTION_METHOD == "random":
             frame_range = range(self.start_frame, self.end_frame + 1)
             frame_indices = sorted(random.sample(frame_range, self.NUM_FRAMES))
-        else: # spaced_fixed (default) or spaced_varied
+        else: # space_fixed (default) or space_varied
             step_size = self.clip_num_frames / self.NUM_FRAMES
-            offset = self.start_frame
-            if self.FRAME_SELECTION_METHOD == "spaced_varied":
-                offset += random.random() * step_size
-            frame_indices = [int(i * step_size + offset) for i in range(self.NUM_FRAMES)]
+            offset = self.start_frame # offset to the first frame
+            if self.FRAME_SELECTION_METHOD == "spaced_fixed":
+                subclip_offset = random.random() * step_size
+                frame_indices = [int(i * step_size + offset + subclip_offset) for i in range(self.NUM_FRAMES)]
+            elif self.FRAME_SELECTION_METHOD == "spaced_varied":
+                frame_indices = [int(i * step_size + offset + random.random() * step_size) for i in range(self.NUM_FRAMES)]
         
         # Load the images from disk and preprocess them into a tensor
         for idx, frame_num in enumerate(frame_indices):
