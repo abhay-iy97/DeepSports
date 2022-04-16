@@ -704,6 +704,7 @@ class DivingViT(nn.Module):
         for num_features, drop_prob in zip(mlp_topology, dropout):
             net.append(nn.Dropout(p=drop_prob))
             net.append(nn.Linear(in_features=last_num_features, out_features=num_features))
+            net.append(nn.ReLU())
             last_num_features = num_features
         # Add last layer
         net.append(nn.Dropout(p=dropout[-1]))
