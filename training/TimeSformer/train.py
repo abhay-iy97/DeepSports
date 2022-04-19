@@ -13,11 +13,13 @@
     test_path				    ./test_split_0.pkl                  .pkl file path
     batch_size				    4                                   [1, inf]
     epochs					    20                                  [1, inf]
-    learning_rate			    0.00001                              [0.0, inf]
+    learning_rate			    0.00001                             [0.0, inf]
     weight_decay			    0.00001                             [0.0, inf]
+    momentum			        0.9                                 [0.0, inf]
+    amsgrad                     False                               [False, True]
     train_val_split_ratio	    0.8                                 [0.0, 1.0]
     frame_num				    8                                   [1, inf]
-    frame_method			    space_fixed		                    [random, spaced_fixed, spaced_varied]
+    frame_method			    space_fixed		                    [random, spaced_fixed, spaced_varied, spaced_fixed_new, spaced_varied_new]
     spatial_size			    224                                 [1, inf]
     freeze					    False                               [False, True]
     dropout					    [0.5, 0.5]                          list of drop prob, [0.0, 1.0] each. dropout is before the linear
@@ -25,11 +27,14 @@
     output					    ./losses.png                        .png file path
     annotation_path			    ./final_annotations_dict.pkl        .pkl file path
     attention_type			    divided_space_time                  [divided_space_time, space_only, joint_space_time]
-    optimizer				    AdamW	                            [Adam, AdamW]
+    optimizer				    AdamW	                            [Adam, AdamW, SGD, RMSProp]
+    activation				    None	                            [None, ReLU]
     patch_size				    16                                  [1, inf]
     embed_dim				    768                                 [1, inf]
     pretrained_model		    none                                path/to/model.pyth or none
     evaluate                    False                               [False, True]
+    normalize                   False                               [False, True]
+    data_aug                    False                               [False, True]
     videos                      all                                 all or list of directories (i.e. 01 02)
 """
 
@@ -63,7 +68,7 @@ Annotation = Dict[Tuple[int, int], Dict[str, float]]
 
 ################################## Miscellaneous ##################################
 
-
+    
 def get_cmdline_arguments() -> Dict[str, Any]:
     """
     Parses the command line arguments and validates them.
@@ -107,6 +112,33 @@ def get_cmdline_arguments() -> Dict[str, Any]:
         "--evaluate",
         type=str,
         help="Whether to use evaluate on testing dataset. Defaults to False.",
+        default='False',
+        required=False
+    )
+    
+    parser.add_argument(
+        "-norm",
+        "--normalize",
+        type=str,
+        help="Whether to use normalize the RGB channels in the video clips as a preprocessing step. Defaults to False.",
+        default='False',
+        required=False
+    )
+    
+    parser.add_argument(
+        "-da",
+        "--data_aug",
+        type=str,
+        help="Whether to use randomly resize and crop the video clips as a preprocessing step. Defaults to False.",
+        default='False',
+        required=False
+    )
+    
+    parser.add_argument(
+        "-ams",
+        "--amsgrad",
+        type=str,
+        help="Whether to use amsgrad for Adam/AdamW optimizer. Defaults to False.",
         default='False',
         required=False
     )
@@ -184,6 +216,15 @@ def get_cmdline_arguments() -> Dict[str, Any]:
     )
     
     parser.add_argument(
+        "-mom",
+        "--momentum",
+        type=float,
+        help="The momentum used in SGD/RMSProp optimizers for training. Default value is 0.9.",
+        default=0.9,
+        required=False
+    )
+    
+    parser.add_argument(
         "-at",
         "--attention_type",
         type=str,
@@ -193,10 +234,19 @@ def get_cmdline_arguments() -> Dict[str, Any]:
     )
     
     parser.add_argument(
+        "-act",
+        "--activation",
+        type=str,
+        help="The activation function used in the MLP network. Default value is 'None'. Possible values are: ['None', 'ReLU']",
+        default="None",
+        required=False
+    )
+    
+    parser.add_argument(
         "-opt",
         "--optimizer",
         type=str,
-        help="The optimizer used in training. Default value is 'AdamW'. Possible values are: ['Adam', 'AdamW'] (not case-sensitive)",
+        help="The optimizer used in training. Default value is 'AdamW'. Possible values are: ['Adam', 'AdamW', 'SGD', 'RMSProp'] (not case-sensitive)",
         default="AdamW",
         required=False
     )
@@ -250,7 +300,7 @@ def get_cmdline_arguments() -> Dict[str, Any]:
         "-fm",
         "--frame_method",
         type=str,
-        help="The algorithm to use to sample frames from a long clip. Default is 'spaced_fixed'. Possible values are ['random', 'spaced_fixed', 'spaced_varied'].",
+        help="The algorithm to use to sample frames from a long clip. Default is 'spaced_fixed'. Possible values are ['random', 'spaced_fixed', 'spaced_varied', 'spaced_fixed_new', 'spaced_varied_new'].",
         default="spaced_fixed",
         required=False
     )
@@ -317,6 +367,9 @@ def get_cmdline_arguments() -> Dict[str, Any]:
     # Convert booleans to the correct type (workaround of argparse)
     args["gpu"] = bool(args["gpu"].lower() == "true")
     args["evaluate"] = bool(args["evaluate"].lower() == "true")
+    args["normalize"] = bool(args["normalize"].lower() == "true")
+    args["data_aug"] = bool(args["data_aug"].lower() == "true")
+    args["amsgrad"] = bool(args["amsgrad"].lower() == "true")
     args["freeze"] = bool(args["freeze"].lower() == "true")
     
     # Convert any relative paths to absolute paths
@@ -332,15 +385,16 @@ def get_cmdline_arguments() -> Dict[str, Any]:
         args["pretrained_model"] = args["pretrained_model"].lower()
     else:
         args["pretrained_model"] = os.path.abspath(args["pretrained_model"])
-       
+    
     # Lowercase strings to allow case-insensitive input
     args["optimizer"] = args["optimizer"].lower()
     args["frame_method"] = args["frame_method"].lower()
     args["attention_type"] = args["attention_type"].lower()
+    args["activation"] = args["activation"].lower()
     args["videos"] = [x.lower() for x in args["videos"]]
         
     # Ensure validation of arguments
-    if args["frame_method"] not in ["random", "spaced_fixed", "spaced_varied"]:
+    if args["frame_method"] not in ["random", "spaced_fixed", "spaced_varied", "spaced_fixed_new", "spaced_varied_new"]:
         logging.warning(f"The parameter frame_method uses an invalid value ({args['frame_method']}). Will use 'spaced_fixed' instead.")
         args["frame_method"] = "spaced_fixed"
     if args["attention_type"] not in ["divided_space_time", "space_only","joint_space_time"]:
@@ -349,6 +403,12 @@ def get_cmdline_arguments() -> Dict[str, Any]:
     if len(args["topology"]) != len(args["dropout"]):
         logging.warning(f"Dropouts and Topology do not match. Topology: {args['topology']}. Dropout: {args['dropout']}. Using dropout of 0.5 for each layer instead.")
         args["dropout"] = [0.5] * len(args["topology"])
+    if args["optimizer"] not in ["adam", "adamw", "sgd", "rmsprop"]:
+        logging.warning(f"The parameter optimizer uses an invalid value ({args['optimizer']}). Will use 'AdamW' instead.")
+        args["optimizer"] = "adamw"
+    if args["activation"] not in ["none", "relu"]:
+        logging.warning(f"The parameter activation uses an invalid value ({args['activation']}). Will use 'None' instead.")
+        args["activation"] = "none"
         
     if args["videos"][0] == "all":
         args["videos"] = [1, 2, 3, 4, 5, 6, 7, 9, 10, 13, 14, 17, 18, 22, 26]
@@ -415,7 +475,13 @@ class VideoClip:
     """
     
     # Convertor between PIL images to PyTorch Tensor
-    CONVERT_TENSOR = transforms.ToTensor()
+    PIL_TO_TENSOR = None
+    
+    # Normalizes the RGB channels on the video clip
+    VIDEO_NORMALIZE = None
+    
+    # Randomly scale and crop the video clip
+    VIDEO_RANDOM_RESIZE_CROP = None
     
     # The root directory path to the frames on disk (should be the one that includes the 01/ 02/ ... directories)
     FRAME_ROOT_DIR = "./"
@@ -464,6 +530,23 @@ class VideoClip:
         self.NUM_FRAMES = args["frame_num"]
         self.SPATIAL_SIZE = args["spatial_size"]
         
+        if self.PIL_TO_TENSOR is None:
+            self.PIL_TO_TENSOR = transforms.ToTensor()
+        
+        if args["normalize"] and self.VIDEO_NORMALIZE is None:
+            self.VIDEO_NORMALIZE = transforms.Compose([
+                transforms.Normalize(
+                    mean=(0.0003, 0.0004, 0.0006),
+                    std=(9.3083e-05, 1.1073e-04, 1.3427e-04)
+                ),
+            ])
+            
+        if args["data_aug"] and self.VIDEO_RANDOM_RESIZE_CROP is None:
+            self.VIDEO_RANDOM_RESIZE_CROP = transforms.Compose([
+                transforms.RandomResizedCrop(size=(args["spatial_size"], args["spatial_size"]), scale=(0.75, 1.0)),
+                transforms.RandomHorizontalFlip(),
+            ])
+        
     def load(self) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Loads the clip from disk and returns the inputs and the targets as a tuple of pytorch's tensor:
@@ -483,13 +566,20 @@ class VideoClip:
         if self.FRAME_SELECTION_METHOD == "random":
             frame_range = range(self.start_frame, self.end_frame + 1)
             frame_indices = sorted(random.sample(frame_range, self.NUM_FRAMES))
-        else: # space_fixed (default) or space_varied
+        
+        else: # space_fixed (default) or space_varied (and their newer implementation variants)
             step_size = self.clip_num_frames / self.NUM_FRAMES
             offset = self.start_frame # offset to the first frame
-            if self.FRAME_SELECTION_METHOD == "spaced_fixed":
+            
+            if self.FRAME_SELECTION_METHOD == "space_fixed":
+                frame_indices = [int(i * step_size + offset) for i in range(self.NUM_FRAMES)]
+            elif self.FRAME_SELECTION_METHOD == "space_varied":
+                offset += random.random() * step_size
+                frame_indices = [int(i * step_size + offset) for i in range(self.NUM_FRAMES)]
+            elif self.FRAME_SELECTION_METHOD == "space_fixed_new":
                 subclip_offset = random.random() * step_size
                 frame_indices = [int(i * step_size + offset + subclip_offset) for i in range(self.NUM_FRAMES)]
-            elif self.FRAME_SELECTION_METHOD == "spaced_varied":
+            elif self.FRAME_SELECTION_METHOD == "space_varied_new":
                 frame_indices = [int(i * step_size + offset + random.random() * step_size) for i in range(self.NUM_FRAMES)]
         
         # Load the images from disk and preprocess them into a tensor
@@ -498,9 +588,17 @@ class VideoClip:
             if not os.path.exists(img_path):
                 logging.error(f"File does not exist: {img_path}. frame_indices={frame_indices}, step_size={step_size}, offset={offset}, start={self.start_frame}, end={self.end_frame}")
                 sys.exit()
-            img = Image.open(img_path).resize((self.SPATIAL_SIZE, self.SPATIAL_SIZE))
-            tensor = self.CONVERT_TENSOR(img).type(dtype=torch.float32) # (channels, height, width)
+            img = Image.open(img_path)
+            tensor = self.PIL_TO_TENSOR(img).type(dtype=torch.float32) # (channels, height, width)
             clip[:, idx, :, :] = tensor
+        
+        # Normalize the video clip
+        if self.VIDEO_NORMALIZE is not None:
+            tensor = self.VIDEO_NORMALIZE(tensor)
+        
+        # Randomly resize and crop the video
+        if self.VIDEO_RANDOM_RESIZE_CROP is not None:
+            tensor = self.VIDEO_RANDOM_RESIZE_CROP(tensor)
         
         # Create the outputs/targets for this clip
         target = torch.tensor([self.normalized_score, self.difficulty], dtype=torch.float32)
@@ -679,7 +777,7 @@ def load_dataset(annotations: Annotation, args: Dict[str, Any]) -> Tuple[DataLoa
 
 
 class DivingViT(nn.Module):
-    def __init__(self, timesformer: TimeSformer, mlp_topology: List[int], dropout: List[float], freeze:bool=False) -> None:
+    def __init__(self, timesformer: TimeSformer, mlp_topology: List[int], dropout: List[float], freeze:bool=False, activation:str="none") -> None:
         """
         Builds upon the TimeSformer model with additional MLP layers that are user-defined.
 
@@ -688,6 +786,7 @@ class DivingViT(nn.Module):
             mlp_topology (List[int]): The number of hidden neurons in the MLP layer after the pretrained model (excluding the 768 from the model and the 2 at the output).
             dropout (List[float]): Drop probability for dropout for each MLP layer after the TimeSformer model.
             freeze (bool, optional): Whether to freeze the pretrained model weights (except its head) or also add them to the gradient updates. Defaults to False.
+            activation (str, optional): The activation function used in the MLP layers. Defaults to "none". Only supports ["none", "relu"].
         """
         super().__init__()
         
@@ -706,7 +805,8 @@ class DivingViT(nn.Module):
         for num_features, drop_prob in zip(mlp_topology, dropout):
             net.append(nn.Dropout(p=drop_prob))
             net.append(nn.Linear(in_features=last_num_features, out_features=num_features))
-            net.append(nn.ReLU())
+            if activation == "relu":
+                net.append(nn.ReLU())
             last_num_features = num_features
         # Add last layer
         net.append(nn.Dropout(p=dropout[-1]))
@@ -764,7 +864,8 @@ def create_model(device: torch.device, args: Dict[str, Any]) -> DivingViT:
         timesformer=timesformer,
         dropout=args["dropout"],
         freeze=args["freeze"],
-        mlp_topology=args["topology"]
+        mlp_topology=args["topology"],
+        activation=args["activation"]
     )
     
     # To allow for multiple GPUs
@@ -798,9 +899,13 @@ def train(model: DivingViT, device: torch.device, train_data_loader: DataLoader,
     
     # Optimizer
     if args["optimizer"].lower() == "adam":
-        optimizer = optim.Adam(params=model.parameters(), lr=args["learning_rate"], weight_decay=args["weight_decay"])
-    else:
-        optimizer = optim.AdamW(params=model.parameters(), lr=args["learning_rate"], weight_decay=args["weight_decay"])
+        optimizer = optim.Adam(params=model.parameters(), lr=args["learning_rate"], weight_decay=args["weight_decay"], amsgrad=args["amsgrad"])
+    elif args["optimizer"].lower() == "adamw":
+        optimizer = optim.AdamW(params=model.parameters(), lr=args["learning_rate"], weight_decay=args["weight_decay"], amsgrad=args["amsgrad"])
+    elif args["optimizer"].lower() == "sgd":
+        optimizer = optim.SGD(params=model.parameters(), lr=args["learning_rate"], weight_decay=args["weight_decay"], momentum=args["momentum"])
+    elif args["optimizer"].lower() == "rmsprop":
+        optimizer = optim.RMSprop(params=model.parameters(), lr=args["learning_rate"], weight_decay=args["weight_decay"], momentum=args["momentum"])
     
     scaler = torch.cuda.amp.GradScaler()
     
