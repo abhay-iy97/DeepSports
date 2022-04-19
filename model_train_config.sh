@@ -2,14 +2,23 @@
 cd "/home1/$USER/DeepSports/training/TimeSformer"
 python3 train.py --loglevel INFO \
     --root_dir "/scratch1/$USER/DeepSports_dataset/whole_videos_frames" \
-    --evaluate True \
     --output "/home1/$USER/DeepSports/losses.png" \
-    --pretrained_model ./TimeSformer_divST_8x32_224_K400.pyth \
-    --batch_size 4 \
-    --epochs 5 \
+    --evaluate True \
+    --pretrained_model "./TimeSformer_divST_96x32_224_HowTo100M.pyth" \
+    --freeze False \
+    --train_val_split_ratio 0.8 \
+    --batch_size 8 \
+    --epochs 200 \
+    --spatial_size 224 \
+    --normalize True \
+    --data_aug True \
+    --frame_method spaced_varied_new \
+    --frame_num 48 \
+    --optimizer AdamW \
+    --amsgrad True \
     --learning_rate 0.00001 \
     --weight_decay 0.00001 \
-    --optimizer AdamW \
-    --dropout 0.5 \
-    --frame_method spaced_varied \
-    --topology 512 256
+    --momentum 0.9 \
+    --activation LeakyReLU \
+    --dropout 0.2 0.2 \
+    --topology 512 512
