@@ -475,9 +475,6 @@ class VideoClip:
     A data class to hold a single video clip for the MTL-AQA dataset.
     """
     
-    # Convertor between PIL images to PyTorch Tensor
-    PIL_TO_TENSOR = None
-    
     # Normalizes the RGB channels on the video clip
     VIDEO_NORMALIZE = None
     
@@ -530,9 +527,6 @@ class VideoClip:
         self.FRAME_SELECTION_METHOD = args["frame_method"].lower()
         self.NUM_FRAMES = args["frame_num"]
         self.SPATIAL_SIZE = args["spatial_size"]
-        
-        if self.PIL_TO_TENSOR is None:
-            self.PIL_TO_TENSOR = transforms.ToTensor()
         
         if args["normalize"] and self.VIDEO_NORMALIZE is None:
             self.VIDEO_NORMALIZE = transforms.Compose([
