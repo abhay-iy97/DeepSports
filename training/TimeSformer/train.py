@@ -28,7 +28,7 @@
     annotation_path			    ./final_annotations_dict.pkl        .pkl file path
     attention_type			    divided_space_time                  [divided_space_time, space_only, joint_space_time]
     optimizer				    AdamW	                            [Adam, AdamW, SGD, RMSProp]
-    activation				    None	                            [None, ReLU]
+    activation				    None	                            [None, ReLU, LeakyReLU]
     patch_size				    16                                  [1, inf]
     embed_dim				    768                                 [1, inf]
     pretrained_model		    none                                path/to/model.pyth or none
@@ -237,7 +237,7 @@ def get_cmdline_arguments() -> Dict[str, Any]:
         "-act",
         "--activation",
         type=str,
-        help="The activation function used in the MLP network. Default value is 'None'. Possible values are: ['None', 'ReLU']",
+        help="The activation function used in the MLP network. Default value is 'None'. Possible values are: ['None', 'ReLU', 'LeakyReLU']",
         default="None",
         required=False
     )
@@ -406,7 +406,7 @@ def get_cmdline_arguments() -> Dict[str, Any]:
     if args["optimizer"] not in ["adam", "adamw", "sgd", "rmsprop"]:
         logging.warning(f"The parameter optimizer uses an invalid value ({args['optimizer']}). Will use 'AdamW' instead.")
         args["optimizer"] = "adamw"
-    if args["activation"] not in ["none", "relu"]:
+    if args["activation"] not in ["none", "relu", "leakyrelu"]:
         logging.warning(f"The parameter activation uses an invalid value ({args['activation']}). Will use 'None' instead.")
         args["activation"] = "none"
         
@@ -786,7 +786,7 @@ class DivingViT(nn.Module):
             mlp_topology (List[int]): The number of hidden neurons in the MLP layer after the pretrained model (excluding the 768 from the model and the 2 at the output).
             dropout (List[float]): Drop probability for dropout for each MLP layer after the TimeSformer model.
             freeze (bool, optional): Whether to freeze the pretrained model weights (except its head) or also add them to the gradient updates. Defaults to False.
-            activation (str, optional): The activation function used in the MLP layers. Defaults to "none". Only supports ["none", "relu"].
+            activation (str, optional): The activation function used in the MLP layers. Defaults to "none". Only supports ["none", "relu", "leakyrelu"].
         """
         super().__init__()
         
@@ -807,6 +807,8 @@ class DivingViT(nn.Module):
             net.append(nn.Linear(in_features=last_num_features, out_features=num_features))
             if activation == "relu":
                 net.append(nn.ReLU())
+            elif activation == "leakyrelu":
+                net.append(nn.LeakyReLU())
             last_num_features = num_features
         # Add last layer
         net.append(nn.Dropout(p=dropout[-1]))

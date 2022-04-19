@@ -4,7 +4,7 @@ python3 train.py --loglevel INFO \
     --root_dir "/scratch1/$USER/DeepSports_dataset/whole_videos_frames" \
     --output "/home1/$USER/DeepSports/losses.png" \
     --evaluate True \
-    --pretrained_model ./TimeSformer_divST_96x32_224_HowTo100M.pyth \
+    --pretrained_model "./TimeSformer_divST_96x32_224_HowTo100M.pyth" \
     --freeze False \
     --train_val_split_ratio 0.8 \
     --batch_size 8 \
@@ -19,6 +19,6 @@ python3 train.py --loglevel INFO \
     --learning_rate 0.00001 \
     --weight_decay 0.00001 \
     --momentum 0.9 \
-    --activation ReLU \
+    --activation LeakyReLU \
     --dropout 0.2 0.2 \
     --topology 512 512
