@@ -52,6 +52,7 @@ from torch import optim
 from torch.nn import functional as F
 from torch.utils.data import DataLoader, Dataset, random_split
 from torchvision import transforms
+from torchvision.transforms import functional as T
 from PIL import Image
 import numpy as np
 from timesformer.models.vit import TimeSformer
@@ -480,8 +481,8 @@ class VideoClip:
     # Normalizes the RGB channels on the video clip
     VIDEO_NORMALIZE = None
     
-    # Randomly scale and crop the video clip
-    VIDEO_RANDOM_RESIZE_CROP = None
+    # Randomly crop and flip the video clip
+    VIDEO_CROP_FLIP = None
     
     # The root directory path to the frames on disk (should be the one that includes the 01/ 02/ ... directories)
     FRAME_ROOT_DIR = "./"
@@ -541,9 +542,9 @@ class VideoClip:
                 ),
             ])
             
-        if args["data_aug"] and self.VIDEO_RANDOM_RESIZE_CROP is None:
-            self.VIDEO_RANDOM_RESIZE_CROP = transforms.Compose([
-                transforms.RandomResizedCrop(size=(args["spatial_size"], args["spatial_size"]), scale=(0.75, 1.0)),
+        if args["data_aug"] and self.VIDEO_CROP_FLIP is None:
+            self.VIDEO_CROP_FLIP = transforms.Compose([
+                transforms.RandomCrop(size=(args["spatial_size"], args["spatial_size"])),
                 transforms.RandomHorizontalFlip(),
             ])
         
@@ -557,9 +558,6 @@ class VideoClip:
             Tuple[torch.Tensor, torch.Tensor]: the inputs and the targets as a tuple
         """
         
-        # Creates the video clip in torch with (channels, num_frames, height, width)
-        clip = torch.empty(size=(3, self.NUM_FRAMES, self.SPATIAL_SIZE, self.SPATIAL_SIZE), dtype=torch.float32)
-        
         # Since we are constrained to a set number of frames, sample (somehow) the frames from the entire clip
         frame_indices = None
         
@@ -571,16 +569,23 @@ class VideoClip:
             step_size = self.clip_num_frames / self.NUM_FRAMES
             offset = self.start_frame # offset to the first frame
             
-            if self.FRAME_SELECTION_METHOD == "space_fixed":
+            if self.FRAME_SELECTION_METHOD == "spaced_fixed":
                 frame_indices = [int(i * step_size + offset) for i in range(self.NUM_FRAMES)]
-            elif self.FRAME_SELECTION_METHOD == "space_varied":
+            elif self.FRAME_SELECTION_METHOD == "spaced_varied":
                 offset += random.random() * step_size
                 frame_indices = [int(i * step_size + offset) for i in range(self.NUM_FRAMES)]
-            elif self.FRAME_SELECTION_METHOD == "space_fixed_new":
+            elif self.FRAME_SELECTION_METHOD == "spaced_fixed_new":
                 subclip_offset = random.random() * step_size
                 frame_indices = [int(i * step_size + offset + subclip_offset) for i in range(self.NUM_FRAMES)]
-            elif self.FRAME_SELECTION_METHOD == "space_varied_new":
+            elif self.FRAME_SELECTION_METHOD == "spaced_varied_new":
                 frame_indices = [int(i * step_size + offset + random.random() * step_size) for i in range(self.NUM_FRAMES)]
+        
+        # The intermediate sizes to downsample video resolution
+        downsample_height = 256
+        downsample_width = int(round(downsample_height * 16.0 / 9.0))
+        
+        # Contains the video clip in torch with (channels, num_frames, height, width)
+        clip = torch.empty(size=(3, self.NUM_FRAMES, downsample_height, downsample_width), dtype=torch.float32)
         
         # Load the images from disk and preprocess them into a tensor
         for idx, frame_num in enumerate(frame_indices):
@@ -588,17 +593,24 @@ class VideoClip:
             if not os.path.exists(img_path):
                 logging.error(f"File does not exist: {img_path}. frame_indices={frame_indices}, step_size={step_size}, offset={offset}, start={self.start_frame}, end={self.end_frame}")
                 sys.exit()
+            
             img = Image.open(img_path)
-            tensor = self.PIL_TO_TENSOR(img).type(dtype=torch.float32) # (channels, height, width)
+            tensor = T.to_tensor(img).type(dtype=torch.float32) # (channels, height, width)
+            tensor = T.resize(tensor, size=(downsample_height, downsample_width))
+            
+            # Normalize the RGB values in the video clip
+            if self.VIDEO_NORMALIZE is not None:
+                tensor = self.VIDEO_NORMALIZE(tensor)
+            
             clip[:, idx, :, :] = tensor
+            del tensor
         
-        # Normalize the video clip
-        if self.VIDEO_NORMALIZE is not None:
-            tensor = self.VIDEO_NORMALIZE(tensor)
-        
-        # Randomly resize and crop the video
-        if self.VIDEO_RANDOM_RESIZE_CROP is not None:
-            tensor = self.VIDEO_RANDOM_RESIZE_CROP(tensor)
+        # Randomly crop and flip the video
+        if self.VIDEO_CROP_FLIP is not None:
+            clip = self.VIDEO_CROP_FLIP(clip)
+        # Otherwise downsample to target size directly
+        else:
+            clip = T.resize(clip, size=(self.SPATIAL_SIZE, self.SPATIAL_SIZE))
         
         # Create the outputs/targets for this clip
         target = torch.tensor([self.normalized_score, self.difficulty], dtype=torch.float32)
