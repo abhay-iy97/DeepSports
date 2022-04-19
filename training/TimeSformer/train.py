@@ -536,8 +536,8 @@ class VideoClip:
         if args["normalize"] and self.VIDEO_NORMALIZE is None:
             self.VIDEO_NORMALIZE = transforms.Compose([
                 transforms.Normalize(
-                    mean=(0.0003, 0.0004, 0.0006),
-                    std=(9.3083e-05, 1.1073e-04, 1.3427e-04)
+                    mean=(0.2719, 0.4617, 0.5961),
+                    std=(0.1870, 0.1881, 0.2604)
                 ),
             ])
             
