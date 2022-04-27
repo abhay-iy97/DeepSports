@@ -20,5 +20,6 @@ python3 train.py --loglevel INFO \
     --weight_decay 0.00001 \
     --momentum 0.9 \
     --activation LeakyReLU \
+    --diff_spcoef False \
     --dropout 0.2 0.2 \
     --topology 512 512

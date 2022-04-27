@@ -92,6 +92,7 @@ conda activate timesformer
 pip install torch torchvision fvcore simplejson einops timm
 conda install av -c conda-forge
 pip install psutil scikit-learn opencv-python tensorboard matplotlib
+pip install torchsort
 ```
 
 At this point, you should be set and ready to train models!
@@ -132,6 +133,7 @@ First, modify the contents of <code>/home1/\<username\>/DeepSports/model_train_c
 | **data_aug**              | Whether to use randomly resize and crop the video clips as a preprocessing step.                                                   | <code>False</code>                        | <code>[False, True]</code>                                                              |
 | **amsgrad**               | Whether to use amsgrad for Adam/AdamW optimizer.                                                                                   | <code>False</code>                        | <code>[False, True]</code>                                                              |
 | **videos**                | The videos directory name to use. Default value is 'all'. To use select directories, only list their directory names, i.e. '01 02' | <code>all</code>                          | <code>all or list of directories (i.e. 01 02)</code>                                    |
+| **diff_spcoef**                | Whether to use differentiable spearman correlation as a loss function for training. Default value is 'False' which reverts to MSE loss. | <code>False</code>                          | <code>[False, True]</code>                                    |
 
 Next, you may want to modify the resources allocation of the training job (gpu, time, etc...) in <code>/home1/\<username\>/DeepSports/job_files/train_model.job</code> and then run:
 
