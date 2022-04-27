@@ -36,6 +36,7 @@
     normalize                   False                               [False, True]
     data_aug                    False                               [False, True]
     videos                      all                                 all or list of directories (i.e. 01 02)
+    diff_spcoef                 False                               [False, True]
 """
 
 
@@ -53,6 +54,7 @@ from torch.nn import functional as F
 from torch.utils.data import DataLoader, Dataset, random_split
 from torchvision import transforms
 from torchvision.transforms import functional as T
+import torchsort
 from PIL import Image
 import numpy as np
 from timesformer.models.vit import TimeSformer
@@ -113,6 +115,14 @@ def get_cmdline_arguments() -> Dict[str, Any]:
         "--evaluate",
         type=str,
         help="Whether to use evaluate on testing dataset. Defaults to False.",
+        default='False',
+        required=False
+    )
+    
+    parser.add_argument(
+        "--diff_spcoef",
+        type=str,
+        help="Whether to use differentiable spearman correlation loss function or revert to MSE for training. Defaults to False (MSE loss).",
         default='False',
         required=False
     )
@@ -372,6 +382,7 @@ def get_cmdline_arguments() -> Dict[str, Any]:
     args["data_aug"] = bool(args["data_aug"].lower() == "true")
     args["amsgrad"] = bool(args["amsgrad"].lower() == "true")
     args["freeze"] = bool(args["freeze"].lower() == "true")
+    args["diff_spcoef"] = bool(args["diff_spcoef"].lower() == "true")
     
     # Convert any relative paths to absolute paths
     args["root_dir"] = os.path.abspath(args["root_dir"])
@@ -465,6 +476,27 @@ def spearman_correlation(x: torch.Tensor, y: torch.Tensor):
     upper = 6 * torch.sum((x_rank - y_rank).pow(2))
     down = n * (n ** 2 - 1.0)
     return 1.0 - (upper / down)
+
+
+def differentiable_spearman_correlation_loss(pred: torch.Tensor, target: torch.Tensor) -> float:
+    """
+    A differentiable spearman correlation function using torchsort from:
+        https://github.com/teddykoker/torchsort
+
+    Args:
+        pred (torch.Tensor): prediction tensor
+        target (torch.Tensor): target tensor
+
+    Returns:
+        float: spearman correlation value
+    """
+    pred = torchsort.soft_rank(pred)
+    target = torchsort.soft_rank(target)
+    pred = pred - pred.mean()
+    pred = pred / pred.norm()
+    target = target - target.mean()
+    target = target / target.norm()
+    return (pred * target).sum()
 
 
 ################################## Data Preparation ##################################
@@ -909,6 +941,11 @@ def train(model: DivingViT, device: torch.device, train_data_loader: DataLoader,
     """
     logging.info("Training model...")
     
+    # Loss
+    loss_fn = F.mse_loss
+    if args["diff_spcoef"]:
+        loss_fn = differentiable_spearman_correlation_loss
+    
     # Optimizer
     if args["optimizer"].lower() == "adam":
         optimizer = optim.Adam(params=model.parameters(), lr=args["learning_rate"], weight_decay=args["weight_decay"], amsgrad=args["amsgrad"])
@@ -941,7 +978,7 @@ def train(model: DivingViT, device: torch.device, train_data_loader: DataLoader,
             # Forward pass with autocast, which automatically casts to lower floating precision if needed
             with torch.cuda.amp.autocast():
                 outputs = model(inputs)
-                loss = F.mse_loss(outputs, targets)
+                loss = loss_fn(outputs, targets)
             
             scaler.scale(loss).backward()
             scaler.step(optimizer)
@@ -969,7 +1006,7 @@ def train(model: DivingViT, device: torch.device, train_data_loader: DataLoader,
                 # Forward pass with autocast, which automatically casts to lower floating precision if needed
                 with torch.cuda.amp.autocast():
                     outputs = model(inputs)
-                    loss = F.mse_loss(outputs, targets)
+                    loss = loss_fn(outputs, targets)
                 
                 val_loss.append(loss.item())
                 spearman_outputs.append(outputs)
