@@ -36,7 +36,9 @@
     normalize                   False                               [False, True]
     data_aug                    False                               [False, True]
     videos                      all                                 all or list of directories (i.e. 01 02)
-    diff_spcoef                 False                               [False, True]
+    loss_mse_weight             1                                   [-inf, inf]
+    loss_spcoef_weight          0                                   [-inf, inf]
+    use_decoder                 False                               [False, True]
 """
 
 
@@ -106,7 +108,15 @@ def get_cmdline_arguments() -> Dict[str, Any]:
         "--gpu",
         type=str,
         help="Whether to use GPU for training. Defaults to True.",
-        default='True',
+        default="True",
+        required=False
+    )
+    
+    parser.add_argument(
+        "--use_decoder",
+        type=str,
+        help="Whether to use a Transformer Decoder or revert to using MLP. Defaults to False.",
+        default="False",
         required=False
     )
     
@@ -115,15 +125,23 @@ def get_cmdline_arguments() -> Dict[str, Any]:
         "--evaluate",
         type=str,
         help="Whether to use evaluate on testing dataset. Defaults to False.",
-        default='False',
+        default="False",
         required=False
     )
     
     parser.add_argument(
-        "--diff_spcoef",
-        type=str,
-        help="Whether to use differentiable spearman correlation loss function or revert to MSE for training. Defaults to False (MSE loss).",
-        default='False',
+        "--loss_spcoef_weight",
+        type=float,
+        help="The loss weight for the spearman coefficient. Defaults to 0 (No spearman in loss).",
+        default=0,
+        required=False
+    )
+    
+    parser.add_argument(
+        "--loss_mse_weight",
+        type=float,
+        help="The loss weight for the MSE. Defaults to 1.",
+        default=1,
         required=False
     )
     
@@ -132,7 +150,7 @@ def get_cmdline_arguments() -> Dict[str, Any]:
         "--normalize",
         type=str,
         help="Whether to use normalize the RGB channels in the video clips as a preprocessing step. Defaults to False.",
-        default='False',
+        default="False",
         required=False
     )
     
@@ -141,7 +159,7 @@ def get_cmdline_arguments() -> Dict[str, Any]:
         "--data_aug",
         type=str,
         help="Whether to use randomly resize and crop the video clips as a preprocessing step. Defaults to False.",
-        default='False',
+        default="False",
         required=False
     )
     
@@ -150,7 +168,7 @@ def get_cmdline_arguments() -> Dict[str, Any]:
         "--amsgrad",
         type=str,
         help="Whether to use amsgrad for Adam/AdamW optimizer. Defaults to False.",
-        default='False',
+        default="False",
         required=False
     )
     
@@ -330,7 +348,7 @@ def get_cmdline_arguments() -> Dict[str, Any]:
         "--freeze",
         type=str,
         help="Whether to freeze the gradients in the TimeSformer model. Defaults to False.",
-        default='False',
+        default="False",
         required=False
     )
     
@@ -382,7 +400,7 @@ def get_cmdline_arguments() -> Dict[str, Any]:
     args["data_aug"] = bool(args["data_aug"].lower() == "true")
     args["amsgrad"] = bool(args["amsgrad"].lower() == "true")
     args["freeze"] = bool(args["freeze"].lower() == "true")
-    args["diff_spcoef"] = bool(args["diff_spcoef"].lower() == "true")
+    args["decoder"] = bool(args["decoder"].lower() == "true")
     
     # Convert any relative paths to absolute paths
     args["root_dir"] = os.path.abspath(args["root_dir"])
@@ -478,7 +496,7 @@ def spearman_correlation(x: torch.Tensor, y: torch.Tensor):
     return 1.0 - (upper / down)
 
 
-def differentiable_spearman_correlation_loss(pred: torch.Tensor, target: torch.Tensor) -> float:
+def differentiable_spearman_correlation(pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
     """
     A differentiable spearman correlation function using torchsort from:
         https://github.com/teddykoker/torchsort
@@ -488,15 +506,36 @@ def differentiable_spearman_correlation_loss(pred: torch.Tensor, target: torch.T
         target (torch.Tensor): target tensor
 
     Returns:
-        float: spearman correlation value
+        torch.Tensor: spearman correlation value
     """
-    pred = torchsort.soft_rank(pred)
-    target = torchsort.soft_rank(target)
+    pred = torchsort.soft_rank(pred.float().cpu())
+    target = torchsort.soft_rank(target.float().cpu())
     pred = pred - pred.mean()
     pred = pred / pred.norm()
     target = target - target.mean()
     target = target / target.norm()
     return (pred * target).sum()
+
+
+def custom_loss(outputs: torch.Tensor, targets: torch.Tensor, mse_weight: float, spcoeff_weight: float, device: torch.device) -> torch.Tensor:
+    """A custom loss that combines MSE loss with differentiable spearman correlation: alpha * MSE - beta * spcoeff.
+
+    Args:
+        outputs (torch.Tensor): the predictions from the model
+        targets (torch.Tensor): the ground truth labels
+        mse_weight (float): the weight given for MSE loss
+        spcoeff_weight (float): the weight given for the spearman correlation loss
+        device (torch.device): the device to cast the loss to
+
+    Returns:
+        torch.Tensor: the combined loss
+    """
+    loss = F.mse_loss(outputs, targets) * mse_weight
+    if spcoeff_weight != 0:
+        spcoef = differentiable_spearman_correlation(outputs, targets) * spcoeff_weight
+        spcoef = spcoef.to(device)
+        loss -= spcoef
+    return loss
 
 
 ################################## Data Preparation ##################################
@@ -815,7 +854,7 @@ def load_dataset(annotations: Annotation, args: Dict[str, Any]) -> Tuple[DataLoa
 
 
 class DivingViT(nn.Module):
-    def __init__(self, timesformer: TimeSformer, mlp_topology: List[int], dropout: List[float], freeze:bool=False, activation:str="none") -> None:
+    def __init__(self, timesformer: TimeSformer, mlp_topology: List[int], dropout: List[float], freeze:bool=False, activation:str="none", use_decoder:bool=False) -> None:
         """
         Builds upon the TimeSformer model with additional MLP layers that are user-defined.
 
@@ -825,6 +864,7 @@ class DivingViT(nn.Module):
             dropout (List[float]): Drop probability for dropout for each MLP layer after the TimeSformer model.
             freeze (bool, optional): Whether to freeze the pretrained model weights (except its head) or also add them to the gradient updates. Defaults to False.
             activation (str, optional): The activation function used in the MLP layers. Defaults to "none". Only supports ["none", "relu", "leakyrelu", "elu", "gelu"].
+            use_decoder (bool, optional): Whether to use a Transformer Decoder or revert to using MLP. Defaults to False (use MLP).
         """
         super().__init__()
         
@@ -837,26 +877,34 @@ class DivingViT(nn.Module):
             for param in timesformer.model.head.parameters():
                 param.requires_grad = True
         
-        # Build the MLP linear net, starts with 768, ... (mlp_topology) ..., 2
-        net = []
-        last_num_features = self.timesformer.model.embed_dim # 768
-        for num_features, drop_prob in zip(mlp_topology, dropout):
-            net.append(nn.Dropout(p=drop_prob))
-            net.append(nn.Linear(in_features=last_num_features, out_features=num_features))
-            if activation == "relu":
-                net.append(nn.ReLU())
-            elif activation == "leakyrelu":
-                net.append(nn.LeakyReLU())
-            elif activation == "elu":
-                net.append(nn.ELU())
-            elif activation == "gelu":
-                net.append(nn.GELU())
-            last_num_features = num_features
-        # Add last layer
-        net.append(nn.Dropout(p=dropout[-1]))
-        net.append(nn.Linear(in_features=last_num_features, out_features=2))
-        
-        self.stacked_mlp = nn.Sequential(*net)
+        # Use the Transformer Decoder
+        if use_decoder:
+            decoder_layer = nn.TransformerDecoderLayer(d_model=768, nhead=8)
+            self.decoder = nn.Sequential(
+                nn.TransformerDecoder(decoder_layer=decoder_layer, num_layers=4),
+                nn.Linear(768, 2)
+            )
+        # Use the MLP as a decoder
+        else:
+            # Build the MLP linear net, starts with 768, ... (mlp_topology) ..., 2
+            net = []
+            last_num_features = self.timesformer.model.embed_dim # 768
+            for num_features, drop_prob in zip(mlp_topology, dropout):
+                net.append(nn.Dropout(p=drop_prob))
+                net.append(nn.Linear(in_features=last_num_features, out_features=num_features))
+                if activation == "relu":
+                    net.append(nn.ReLU())
+                elif activation == "leakyrelu":
+                    net.append(nn.LeakyReLU())
+                elif activation == "elu":
+                    net.append(nn.ELU())
+                elif activation == "gelu":
+                    net.append(nn.GELU())
+                last_num_features = num_features
+            # Add last layer
+            net.append(nn.Dropout(p=dropout[-1]))
+            net.append(nn.Linear(in_features=last_num_features, out_features=2))
+            self.decoder = nn.Sequential(*net)
         
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -870,7 +918,7 @@ class DivingViT(nn.Module):
             torch.Tensor: the normalized score and the difficulty in the shape (2,)
         """
         out = self.timesformer(x)   # (batch, 768)
-        out = self.stacked_mlp(out) # (batch, 2)
+        out = self.decoder(out) # (batch, 2)
         return out
 
 
@@ -909,7 +957,8 @@ def create_model(device: torch.device, args: Dict[str, Any]) -> DivingViT:
         dropout=args["dropout"],
         freeze=args["freeze"],
         mlp_topology=args["topology"],
-        activation=args["activation"]
+        activation=args["activation"],
+        use_decoder=args["use_decoder"]
     )
     
     # To allow for multiple GPUs
@@ -940,12 +989,7 @@ def train(model: DivingViT, device: torch.device, train_data_loader: DataLoader,
         Tuple[List[float], List[float], List[float]]: a tuple of training losses, validation losses, and validation spearman correlation per epoch
     """
     logging.info("Training model...")
-    
-    # Loss
-    loss_fn = F.mse_loss
-    if args["diff_spcoef"]:
-        loss_fn = differentiable_spearman_correlation_loss
-    
+   
     # Optimizer
     if args["optimizer"].lower() == "adam":
         optimizer = optim.Adam(params=model.parameters(), lr=args["learning_rate"], weight_decay=args["weight_decay"], amsgrad=args["amsgrad"])
@@ -978,7 +1022,8 @@ def train(model: DivingViT, device: torch.device, train_data_loader: DataLoader,
             # Forward pass with autocast, which automatically casts to lower floating precision if needed
             with torch.cuda.amp.autocast():
                 outputs = model(inputs)
-                loss = loss_fn(outputs, targets)
+                # Custom loss that is alpha*MSE - beta*spearman
+                loss = custom_loss(outputs, targets, args["loss_mse_weight"], args["loss_spcoef_weight"], device)
             
             scaler.scale(loss).backward()
             scaler.step(optimizer)
@@ -1006,7 +1051,8 @@ def train(model: DivingViT, device: torch.device, train_data_loader: DataLoader,
                 # Forward pass with autocast, which automatically casts to lower floating precision if needed
                 with torch.cuda.amp.autocast():
                     outputs = model(inputs)
-                    loss = loss_fn(outputs, targets)
+                    # Custom loss that is alpha*MSE - beta*spearman
+                    loss = custom_loss(outputs, targets, args["loss_mse_weight"], args["loss_spcoef_weight"], device)
                 
                 val_loss.append(loss.item())
                 spearman_outputs.append(outputs)
@@ -1030,7 +1076,7 @@ def train(model: DivingViT, device: torch.device, train_data_loader: DataLoader,
 ################################## Evaluation ##################################
 
 
-def evaluate(model: DivingViT, device: torch.device, test_data_loader: DataLoader) -> None:
+def evaluate(model: DivingViT, device: torch.device, test_data_loader: DataLoader, args: Dict[str, Any]) -> None:
     """
     Evaluates the model on the testing dataset by computing the testing loss and spearman correlation.
 
@@ -1038,6 +1084,7 @@ def evaluate(model: DivingViT, device: torch.device, test_data_loader: DataLoade
         model (DivingViT): model to evaluate
         device (torch.device): the device (cpu/gpu) to run on
         test_data_loader (DataLoader): testing dataset
+        args (Dict[str, Any]): commandline arguments
     """
     logging.info("Evaluating model...")
     
@@ -1054,7 +1101,8 @@ def evaluate(model: DivingViT, device: torch.device, test_data_loader: DataLoade
             # Forward pass with autocast, which automatically casts to lower floating precision if needed
             with torch.cuda.amp.autocast():
                 outputs = model(inputs)
-                loss = F.mse_loss(outputs, targets)
+                # Custom loss that is alpha*MSE - beta*spearman
+                loss = custom_loss(outputs, targets, args["loss_mse_weight"], args["loss_spcoef_weight"], device)
 
             test_loss.append(loss.item())
             spearman_outputs.append(outputs)
@@ -1139,7 +1187,7 @@ def main():
     
     # Evaluate the model
     if args["evaluate"]:
-        evaluate(model, device, test_data)
+        evaluate(model, device, test_data, args)
         plot_losses(args["output"], train_losses, val_losses, val_spearman_correlations)
     
     logging.info("--- End of Program ---")
