@@ -880,7 +880,7 @@ class DivingViT(nn.Module):
         # Use the Transformer Decoder
         if use_decoder:
             decoder_layer = nn.TransformerDecoderLayer(d_model=768, nhead=8)
-            self.decoder = nn.Sequential(
+            self.transformer_decoder = nn.Sequential(
                 nn.TransformerDecoder(decoder_layer=decoder_layer, num_layers=4),
                 nn.Linear(768, 2)
             )
@@ -904,7 +904,7 @@ class DivingViT(nn.Module):
             # Add last layer
             net.append(nn.Dropout(p=dropout[-1]))
             net.append(nn.Linear(in_features=last_num_features, out_features=2))
-            self.decoder = nn.Sequential(*net)
+            self.stacked_mlp = nn.Sequential(*net)
         
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -918,7 +918,10 @@ class DivingViT(nn.Module):
             torch.Tensor: the normalized score and the difficulty in the shape (2,)
         """
         out = self.timesformer(x)   # (batch, 768)
-        out = self.decoder(out) # (batch, 2)
+        if self.stacked_mlp:
+            out = self.stacked_mlp(out) # (batch, 2)
+        else:
+            out = self.transformer_decoder(out, out) # (batch, 2)
         return out
 
 
