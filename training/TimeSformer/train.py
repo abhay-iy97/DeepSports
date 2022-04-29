@@ -400,7 +400,7 @@ def get_cmdline_arguments() -> Dict[str, Any]:
     args["data_aug"] = bool(args["data_aug"].lower() == "true")
     args["amsgrad"] = bool(args["amsgrad"].lower() == "true")
     args["freeze"] = bool(args["freeze"].lower() == "true")
-    args["decoder"] = bool(args["decoder"].lower() == "true")
+    args["use_decoder"] = bool(args["use_decoder"].lower() == "true")
     
     # Convert any relative paths to absolute paths
     args["root_dir"] = os.path.abspath(args["root_dir"])
