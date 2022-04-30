@@ -877,13 +877,14 @@ class DivingViT(nn.Module):
             for param in timesformer.model.head.parameters():
                 param.requires_grad = True
         
+        self.stacked_mlp = None
+        self.transformer_decoder = None
+        
         # Use the Transformer Decoder
         if use_decoder:
             decoder_layer = nn.TransformerDecoderLayer(d_model=768, nhead=8)
-            self.transformer_decoder = nn.Sequential(
-                nn.TransformerDecoder(decoder_layer=decoder_layer, num_layers=4),
-                nn.Linear(768, 2)
-            )
+            self.transformer_decoder = nn.TransformerDecoder(decoder_layer=decoder_layer, num_layers=4)
+            self.stacked_mlp = nn.Linear(768, 2)
         # Use the MLP as a decoder
         else:
             # Build the MLP linear net, starts with 768, ... (mlp_topology) ..., 2
@@ -918,10 +919,9 @@ class DivingViT(nn.Module):
             torch.Tensor: the normalized score and the difficulty in the shape (2,)
         """
         out = self.timesformer(x)   # (batch, 768)
-        if self.stacked_mlp:
-            out = self.stacked_mlp(out) # (batch, 2)
-        else:
-            out = self.transformer_decoder(out, out) # (batch, 2)
+        if self.transformer_decoder is not None:
+            out = self.transformer_decoder(out, out) # (batch, 768)
+        out = self.stacked_mlp(out) # (batch, 2)
         return out
 
 
